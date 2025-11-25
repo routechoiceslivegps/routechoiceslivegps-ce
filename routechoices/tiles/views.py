@@ -2,9 +2,12 @@ from django.http.response import HttpResponseBadRequest
 from django.views.decorators.http import condition
 
 from routechoices.core.models import PRIVACY_PRIVATE, Event
-from routechoices.lib.globalmaptiles import GlobalMercator
-from routechoices.lib.helpers import get_best_image_mime, safe64encodedsha
-from routechoices.lib.slippy_tiles import tile_xy_to_north_west_latlon
+from routechoices.lib.helpers import (
+    get_best_image_mime,
+    meters_to_wgs84,
+    safe64encodedsha,
+)
+from routechoices.lib.slippy_tiles import tile_xy_to_north_west_wgs84
 from routechoices.lib.streaming_response import StreamingHttpRangeResponse
 from routechoices.lib.tile_proxies import (
     leisure_uk_proxy,
@@ -12,8 +15,6 @@ from routechoices.lib.tile_proxies import (
     mapant_ee_proxy,
     mapant_se_proxy,
 )
-
-GLOBAL_MERCATOR = GlobalMercator()
 
 
 def common_tile(function):
@@ -57,15 +58,13 @@ def common_tile(function):
         except Exception:
             return HttpResponseBadRequest("invalid tile indexes")
 
-        max_lat, min_lon = tile_xy_to_north_west_latlon(tile_x, tile_y, tile_z)
-        min_lat, max_lon = tile_xy_to_north_west_latlon(tile_x + 1, tile_y + 1, tile_z)
+        max_lat, min_lon = tile_xy_to_north_west_wgs84(tile_x, tile_y, tile_z).latlon
+        min_lat, max_lon = tile_xy_to_north_west_wgs84(
+            tile_x + 1, tile_y + 1, tile_z
+        ).latlon
 
-        min_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": min_lat, "lon": min_lon})
-        min_x = min_xy["x"]
-        min_y = min_xy["y"]
-        max_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": max_lat, "lon": max_lon})
-        max_x = max_xy["x"]
-        max_y = max_xy["y"]
+        min_x, min_y = meters_to_wgs84((min_lat, min_lon)).xy
+        max_x, max_y = meters_to_wgs84((max_lat, max_lon)).xy
 
         try:
             if "/" in layers_raw:

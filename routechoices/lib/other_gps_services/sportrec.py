@@ -68,18 +68,14 @@ class SportRec(ThirdPartyTrackingSolution):
             raise MapsImportError("API returned error code")
         try:
             map_file = ContentFile(r.content)
-            corners_latlon = self.init_data["competition"]["bounds"].values()
-            corners_coords = []
-            for corner in corners_latlon:
-                corners_coords += corner
-            calib_string = ",".join(str(round(x, 5)) for x in corners_coords)
             map_obj.image.save("imported_image", map_file, save=False)
             im = Image.open(map_file)
             width, height = im.size
             map_obj.width = width
             map_obj.height = height
             map_obj.image.update_dimension_fields(force=True)
-            map_obj.corners_coordinates = calib_string
+            bound = self.init_data["competition"]["bounds"].values()
+            map_obj.bound = bound
             map_obj.save()
         except Exception:
             map_obj.delete()

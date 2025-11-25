@@ -381,7 +381,7 @@ class H02Connection(GenericConnection):
                     print(f"H02 - Error parsing data ({self.address}): {e}", flush=True)
 
 
-class H02Server(GenericTCPServer):
+class TCPServer(GenericTCPServer):
     """
     A TCP server for handling H02 protocol connections.
     """

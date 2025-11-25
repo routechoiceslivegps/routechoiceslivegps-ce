@@ -7,8 +7,10 @@ from curl_cffi import requests
 
 from routechoices.core.models import Competitor, Event, Map
 from routechoices.lib.helpers import (
+    Point,
+    Wgs84Coordinate,
     get_remote_image_sizes,
-    three_point_calibration_to_corners,
+    wgs84_bound_from_3_ref_points,
 )
 from routechoices.lib.other_gps_services.commons import (
     EventImportError,
@@ -82,14 +84,24 @@ class GpsSeurantaNet(ThirdPartyTrackingSolutionWithProxy):
         if not size or not calibration_string:
             return None
 
-        map_obj = Map()
-        map_obj.width = size[0]
-        map_obj.height = size[1]
-        corners = three_point_calibration_to_corners(
-            calibration_string, size[0], size[1]
+        calibration_values = [float(val) for val in calibration_string.split("|")]
+        print(calibration_values)
+        wgs84_coords = list(
+            Wgs84Coordinate((calibration_values[1 + i * 4], calibration_values[i * 4]))
+            for i in range(3)
         )
-        coordinates = ",".join([str(round(x, 5)) for x in corners])
-        map_obj.corners_coordinates = coordinates
+        print(wgs84_coords)
+        image_points = list(
+            Point((calibration_values[2 + i * 4], calibration_values[3 + i * 4]))
+            for i in range(3)
+        )
+
+        width, height = size
+        map_obj = Map(
+            width=width,
+            height=height,
+        )
+        map_obj.bound = wgs84_bound_from_3_ref_points(wgs84_coords, image_points, size)
         return map_obj
 
     def get_competitor_devices_data(self, event):

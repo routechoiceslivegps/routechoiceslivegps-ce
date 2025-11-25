@@ -227,7 +227,7 @@ class Migration(migrations.Migration):
                         ),
                         max_length=255,
                         validators=[
-                            routechoices.lib.validators.validate_corners_coordinates
+                            routechoices.lib.validators.validate_calibration_string
                         ],
                     ),
                 ),

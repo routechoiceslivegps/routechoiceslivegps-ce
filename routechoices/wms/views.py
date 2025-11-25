@@ -1,22 +1,18 @@
-from django.db.models import Prefetch
 from django.http import HttpResponse
 from django.http.response import HttpResponseBadRequest
-from django.shortcuts import render
-from django.utils.timezone import now
 from django.views.decorators.http import condition
 from rest_framework import status
 
 from routechoices.core.models import (
     PRIVACY_PRIVATE,
-    PRIVACY_PUBLIC,
     Event,
-    MapAssignation,
 )
-from routechoices.lib.globalmaptiles import GlobalMercator
-from routechoices.lib.helpers import get_best_image_mime, safe64encodedsha
+from routechoices.lib.helpers import (
+    get_best_image_mime,
+    safe64encodedsha,
+    wgs84_to_meters,
+)
 from routechoices.lib.streaming_response import StreamingHttpRangeResponse
-
-GLOBAL_MERCATOR = GlobalMercator()
 
 
 def common_wms(function):
@@ -63,26 +59,13 @@ def common_wms(function):
             srs = get_params.get("srs")
             try:
                 if srs in ("CRS:84", "EPSG:4326"):
-                    min_lat, min_lon, max_lat, max_lon = (
-                        float(x) for x in bbox_raw.split(",")
-                    )
+                    bound = (float(x) for x in bbox_raw.split(","))
+                    min_lat, min_lon, max_lat, max_lon = bound
                     if srs == "EPSG:4326":
-                        min_lon, min_lat, max_lon, max_lat = (
-                            min_lat,
-                            min_lon,
-                            max_lat,
-                            max_lon,
-                        )
-                    min_xy = GLOBAL_MERCATOR.latlon_to_meters(
-                        {"lat": min_lat, "lon": min_lon}
-                    )
-                    min_x = min_xy["x"]
-                    min_y = min_xy["y"]
-                    max_xy = GLOBAL_MERCATOR.latlon_to_meters(
-                        {"lat": max_lat, "lon": max_lon}
-                    )
-                    max_x = max_xy["x"]
-                    max_y = max_xy["y"]
+                        min_lon, min_lat, max_lon, max_lat = bound
+
+                    min_x, min_y = wgs84_to_meters(min_lat, min_lon).xy
+                    max_x, max_y = wgs84_to_meters(max_lat, max_lon).xy
                 elif srs == "EPSG:3857":
                     min_x, min_y, max_x, max_y = (float(x) for x in bbox_raw.split(","))
                 else:
@@ -169,53 +152,4 @@ def wms_service(request):
             content_type=request.image_request["mime"],
             headers=headers,
         )
-
-    if get_params.get("request", "").lower() == "getcapabilities":
-        max_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": 89.9, "lon": 180})
-        min_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": -89.9, "lon": -180})
-
-        events = (
-            Event.objects.filter(
-                privacy=PRIVACY_PUBLIC,
-                on_events_page=True,
-            )
-            .filter(start_date__lte=now())
-            .select_related("club", "map")
-            .prefetch_related(
-                Prefetch(
-                    "map_assignations",
-                    queryset=MapAssignation.objects.select_related("map"),
-                )
-            )
-        )
-
-        layers = []
-        for event in events:
-            if event.map:
-                layers.append(
-                    {
-                        "id": event.aid,
-                        "event": event,
-                        "title": event.map_title if event.map_title else "Main map",
-                        "map": event.map,
-                    }
-                )
-                count_layer = 1
-                for layer in event.map_assignations.all():
-                    count_layer += 1
-                    layers.append(
-                        {
-                            "id": f"{event.aid}/{count_layer}",
-                            "event": event,
-                            "title": layer.title,
-                            "map": layer.map,
-                        }
-                    )
-        return render(
-            request,
-            "wms/index.xml",
-            {"layers": layers, "min_xy": min_xy, "max_xy": max_xy},
-            content_type="text/xml",
-        )
-
     return HttpResponse(status=status.HTTP_501_NOT_IMPLEMENTED)

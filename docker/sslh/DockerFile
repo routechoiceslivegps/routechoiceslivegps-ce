@@ -1,0 +1,5 @@
+FROM debian:13-slim
+
+RUN apt-get update && apt-get install -y sslh
+
+RUN sslh --transparent --ssh localhost:22 --tls 0.0.0.0:443 -p localhost:443

@@ -8,4 +8,3 @@ cd $BASEDIR
 ./bin/start-django
 ./bin/start-task_queue
 ./bin/start-tornado
-./bin/start-spot

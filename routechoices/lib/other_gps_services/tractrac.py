@@ -7,8 +7,10 @@ from PIL import Image
 
 from routechoices.core.models import PRIVACY_SECRET, Competitor, Device, Event, Map
 from routechoices.lib.helpers import (
+    Point,
+    Wgs84Coordinate,
     safe64encodedsha,
-    three_point_calibration_to_corners,
+    wgs84_bound_from_3_ref_points,
 )
 from routechoices.lib.mtb_decoder import MtbDecoder
 from routechoices.lib.other_gps_services.commons import (
@@ -66,33 +68,22 @@ class Tractrac(ThirdPartyTrackingSolution):
                 map_file = ContentFile(r.content)
                 with Image.open(map_file) as img:
                     width, height = img.size
-                calibration_string = "|".join(
-                    str(x)
-                    for x in [
-                        map_data["long1"],
-                        map_data["lat1"],
-                        map_data["x1"],
-                        map_data["y1"],
-                        map_data["long2"],
-                        map_data["lat2"],
-                        map_data["x2"],
-                        map_data["y2"],
-                        map_data["long3"],
-                        map_data["lat3"],
-                        map_data["x3"],
-                        map_data["y3"],
-                    ]
+                coords_ref = (
+                    Wgs84Coordinate(map_data[f"lat{i}"], map_data[f"long{i}"])
+                    for i in range(1, 4)
                 )
-                corners = three_point_calibration_to_corners(
-                    calibration_string,
-                    width,
-                    height,
+                image_ref = (
+                    Point(map_data[f"x{i}"], map_data[f"long{i}"]) for i in range(1, 4)
                 )
-                coordinates = ",".join([str(round(x, 5)) for x in corners])
+                bound = wgs84_bound_from_3_ref_points(
+                    coords_ref,
+                    image_ref,
+                    (width, height),
+                )
                 map_obj.image.save("imported_image", map_file, save=False)
                 map_obj.width = width
                 map_obj.height = height
-                map_obj.corners_coordinates = coordinates
+                map_obj.bound = bound
                 map_obj.save()
             except Exception:
                 map_obj.delete()

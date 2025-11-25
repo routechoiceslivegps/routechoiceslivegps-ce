@@ -6,6 +6,7 @@ host_patterns = patterns(
     host("www", "routechoices.site.urls", name="www"),
     host("admin", "routechoices.admin.urls", name="admin"),
     host("api", "routechoices.api.urls", name="api"),
+    # host("live", "routechoices.live.urls", name="live"),
     host("map", "routechoices.map.urls", name="map"),
     # host("my", "routechoices.mapdump.urls", name="mapdump"),
     host("registration", "routechoices.registration.urls", name="registration"),

@@ -177,7 +177,7 @@ context("Dashboard actions", () => {
 		cy.get("#validate-calibration-button").click();
 
 		cy.get("#calibration-preview-opener").should("be.visible");
-		cy.get("#id_corners_coordinates")
+		cy.get("#id_calibration_string")
 			.invoke("val")
 			.then((val) => {
 				expect(/^[-]?\d+(\.\d+)?(,[-]?\d+(\.\d+)?){7}$/.test(val));

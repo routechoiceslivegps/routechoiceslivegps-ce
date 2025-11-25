@@ -7,7 +7,6 @@ from routechoices.core.models import Club
 from routechoices.lib.other_gps_services.gpsseuranta import GpsSeurantaNet
 from routechoices.lib.other_gps_services.livelox import Livelox
 from routechoices.lib.other_gps_services.loggator import Loggator
-from routechoices.lib.other_gps_services.otracker import OTracker
 from routechoices.lib.other_gps_services.sportrec import SportRec
 from routechoices.lib.other_gps_services.tractrac import Tractrac
 from routechoices.lib.other_gps_services.virekunnas import GpsVirekunnasFi
@@ -67,18 +66,6 @@ def import_single_event_from_tractrac(event_id, club=None):
     if event_id.startswith(prefix):
         event_id = event_id[len(prefix) :]
     solution = Tractrac()
-    if club:
-        solution.club = Club.objects.get(slug=club)
-    event = solution.import_event(event_id)
-    return event
-
-
-@background(schedule=0)
-def import_single_event_from_otracker(event_id, club=None):
-    prefix = "https://otracker.lt/events/"
-    if event_id.startswith(prefix):
-        event_id = event_id[len(prefix) :]
-    solution = OTracker()
     if club:
         solution.club = Club.objects.get(slug=club)
     event = solution.import_event(event_id)

@@ -4,7 +4,6 @@ from routechoices.core.bg_tasks import (
     import_single_event_from_gps_seuranta,
     import_single_event_from_livelox,
     import_single_event_from_loggator,
-    import_single_event_from_otracker,
     import_single_event_from_sportrec,
     import_single_event_from_tractrac,
     import_single_event_from_virekunnas,
@@ -48,13 +47,6 @@ class Command(BaseCommand):
         )
         loggator_parser.set_defaults(method=self.loggator)
         loggator_parser.add_argument(dest="event_ids", nargs="+", type=str)
-
-        otracker_parser = subparsers.add_parser(
-            "otracker",
-            help="Import from otracker",
-        )
-        otracker_parser.set_defaults(method=self.otracker)
-        otracker_parser.add_argument(dest="event_ids", nargs="+", type=str)
 
         sportrec_parser = subparsers.add_parser(
             "sportrec",
@@ -130,20 +122,6 @@ class Command(BaseCommand):
                     import_single_event_from_loggator(event_id, club=options["club"])
                 else:
                     import_single_event_from_loggator.now(
-                        event_id, club=options["club"]
-                    )
-            except EventImportError:
-                self.stderr.write(f"Could not import event {event_id}")
-                continue
-
-    def otracker(self, *args, **options):
-        for event_id in options["event_ids"]:
-            try:
-                self.stdout.write(f"Importing event {event_id}")
-                if options["task"]:
-                    import_single_event_from_otracker(event_id, club=options["club"])
-                else:
-                    import_single_event_from_otracker.now(
                         event_id, club=options["club"]
                     )
             except EventImportError:

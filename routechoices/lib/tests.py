@@ -7,18 +7,16 @@ from django.test import TestCase, override_settings
 from . import plausible
 from .helpers import (
     check_dns_records,
-    compute_corners_from_kml_latlonbox,
     get_device_name,
     get_image_mime_from_request,
     simplify_periods,
-    three_point_calibration_to_corners,
+    wgs84_bound_from_3_ref_points,
 )
 from .kmz import extract_ground_overlay_info
 
 # from .mtb_decoder import MtbDecoder
-from .slippy_tiles import latlon_to_tile_xy, tile_xy_to_north_west_latlon
 from .validators import (
-    validate_corners_coordinates,
+    validate_calibration_string,
     validate_domain_slug,
     validate_emails,
     validate_esn,
@@ -102,8 +100,8 @@ class PlausibleTestCase(TestCase):
 
 
 class HelperTestCase(TestCase):
-    def test_calibration_conversion(self):
-        cal = three_point_calibration_to_corners(
+    def wgs84_bound_from_3_ref_points(self):
+        cal = wgs84_bound_from_3_ref_points(
             "9.5480564597566|46.701263850274|1|1|9.5617738453051|46.701010852567|4961|1|9.5475331306949|46.687915214433|1|7016",
             4961,
             7016,
@@ -122,35 +120,11 @@ class HelperTestCase(TestCase):
             ],
         )
 
-    def test_kml_cal(self):
-        cal = compute_corners_from_kml_latlonbox(
-            63.35268625254615,
-            63.325978161823549,
-            12.55481008348568,
-            12.470815025221196,
-            -5.6769774354892242,
-        )
-        self.assertEqual(
-            cal,
-            (
-                (65.21144277090194, 15.781876945283638),
-                (61.24478638169717, 66.38761575963139),
-                (10.696053565129883, 60.0149162417611),
-                (14.662709954334655, 9.409177427413347),
-            ),
-        )
-
     def test_check_dns(self):
         self.assertTrue(check_dns_records("latlong.uk"))
         self.assertTrue(check_dns_records("where.rapha.run"))
         self.assertFalse(check_dns_records("doesnotexist.kiilat.com"))
         self.assertFalse(check_dns_records("kiilat.com"))
-
-    def test_slippy_map(self):
-        xy = latlon_to_tile_xy(60, 20, 10)
-        self.assertEqual(xy, (568, 297))
-        lat_lon = tile_xy_to_north_west_latlon(xy[0], xy[1], 10)
-        self.assertEqual(lat_lon, (60.064840460104506, 19.6875))
 
     def test_import_kml(self):
         kml = '<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Folder><name>Ground Overlays</name><description>Examples of ground overlays</description><GroundOverlay><name>Large-scale overlay on terrain</name><description>Overlay shows Mount Etna erupting on July 13th, 2001.</description><Icon><href>https://developers.google.com/kml/documentation/images/etna.jpg</href></Icon><LatLonBox><north>37.91904192681665</north><south>37.46543388598137</south><east>15.35832653742206</east><west>14.60128369746704</west><rotation>-0.1556640799496235</rotation></LatLonBox></GroundOverlay></Folder></kml>'
@@ -209,26 +183,24 @@ class ValidatorsTestCase(TestCase):
         self.assertRaises(ValidationError, validate_esn, None)
 
     def test_validate_corners_coords(self):
-        validate_corners_coordinates("1,1,1,1,1,1,1,1")
-        validate_corners_coordinates("1,360,1,1,1,1,1,1")
-        self.assertRaises(ValidationError, validate_corners_coordinates, "r a@a.aa")
+        validate_calibration_string("1,1,1,1,1,1,1,1")
+        validate_calibration_string("1,360,1,1,1,1,1,1")
+        self.assertRaises(ValidationError, validate_calibration_string, "r a@a.aa")
         self.assertRaises(
-            ValidationError, validate_corners_coordinates, "0,0,0,0,0,0,0,0"
+            ValidationError, validate_calibration_string, "0,0,0,0,0,0,0,0"
+        )
+        self.assertRaises(ValidationError, validate_calibration_string, "1,1,1,1,1,1,1")
+        self.assertRaises(
+            ValidationError, validate_calibration_string, "1,1,1,1,1,1,1,"
         )
         self.assertRaises(
-            ValidationError, validate_corners_coordinates, "1,1,1,1,1,1,1"
+            ValidationError, validate_calibration_string, "1,1,1,1,1,1,1,a"
         )
         self.assertRaises(
-            ValidationError, validate_corners_coordinates, "1,1,1,1,1,1,1,"
+            ValidationError, validate_calibration_string, "1,1,1,1,1,1,1,1,1"
         )
         self.assertRaises(
-            ValidationError, validate_corners_coordinates, "1,1,1,1,1,1,1,a"
-        )
-        self.assertRaises(
-            ValidationError, validate_corners_coordinates, "1,1,1,1,1,1,1,1,1"
-        )
-        self.assertRaises(
-            ValidationError, validate_corners_coordinates, "100,1,1,1,1,1,1,1"
+            ValidationError, validate_calibration_string, "100,1,1,1,1,1,1,1"
         )
 
     def test_validate_domain(self):

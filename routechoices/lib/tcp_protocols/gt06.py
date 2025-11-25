@@ -270,5 +270,5 @@ class GT06Connection(GenericConnection):
         print(f"GT06 - {self.imei} wrote 1 locations to DB", flush=True)
 
 
-class GT06Server(GenericTCPServer):
+class TCPServer(GenericTCPServer):
     connection_class = GT06Connection

@@ -52,11 +52,9 @@ class Loggator(ThirdPartyTrackingSolutionWithProxy):
         map_obj.width = size[0]
         map_obj.height = size[1]
 
-        map_obj.corners_coordinates = ",".join(
-            [
-                f"{map_coords[pos]['lat']:.5f},{map_coords[pos]['lng']:.5f}"
-                for pos in ("topLeft", "topRight", "bottomRight", "bottomLeft")
-            ]
+        map_obj.bound = (
+            (map_coords[pos]["lat"], map_coords[pos]["lng"])
+            for pos in ("topLeft", "topRight", "bottomRight", "bottomLeft")
         )
         return map_obj
 

@@ -19,7 +19,7 @@ class MapApiTestCase(EssentialApiBase):
         raster_map = Map.objects.create(
             club=club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),
@@ -65,7 +65,7 @@ class MapApiTestCase(EssentialApiBase):
         raster_map2 = Map.objects.create(
             club=club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),
@@ -211,7 +211,7 @@ class MapApiTestCase(EssentialApiBase):
         raster_map = Map.objects.create(
             club=club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),
@@ -257,7 +257,7 @@ class MapApiTestCase(EssentialApiBase):
         )
         self.assertEqual(res.headers["X-Cache-Hit"], "1")
         # if map change cache fetching the same tile should not hit cache
-        raster_map.corners_coordinates = (
+        raster_map.calibration_string = (
             "61.45075,24.18994,61.44656,24.24721,61.42094,24.23851,61.42533,24.18155"
         )
         raster_map.save()

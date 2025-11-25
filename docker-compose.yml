@@ -1,19 +1,31 @@
 services:
+  tcp_proxy:
+    container_name: haproxy_rc
+    image: haproxy:lts
+    expose:
+      - ""
   db:
-    container_name: rc_postgres
+    container_name: postgres_rc
     image: postgres:18
     environment:
       POSTGRES_DB: app_db
       POSTGRES_USER: app_user
       POSTGRES_PASSWORD: changeme
-    restart: always
     expose:
-      - "5432"
-  minio:
-    container_name: rc_minio
-    image: minio/minio:latest
+      - "2000"
+      - "2001"
+      - "2005"
+      - "5013"
+      - "5027"
+      - "5023"
+      - "5027"
+      - "5027"
+      - "5027"
+  s3:
+    container_name: s3_rc
+    image: allworldit/minio
     volumes:
-      - ../media:/data
+      - ./media:/data
     expose:
       - "9000"
     environment:
@@ -23,43 +35,42 @@ services:
       - server
       - /data
   smtp:
-    container_name: rc_mailpit
+    container_name: mailpit_rc
     image: axllent/mailpit:latest
     expose:
       - "1025"
     ports:
       - 8025:8025
     volumes:
-      - ../media:/data
+      - ./media:/data
     environment:
       MP_MAX_MESSAGES: 5000
       MP_DATABASE: /data/mailpit.db
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
   nginx:
-    container_name: rc_nginx
-    image: rphlo/nginx:latest
+    container_name: nginx_rc
     ports:
       - "443:443/udp"
       - "443:443/tcp"
     volumes:
-      - ../static:/static:ro
-      - ../letsencrypt/:/etc/nginx/ssl:ro
-      - ../nginx/routechoices.conf:/etc/nginx/conf.d/routechoices.conf:ro
+      - ./static:/static:ro
+      - ./letsencrypt/:/etc/nginx/ssl:ro
+      - ./nginx/website.conf:/etc/nginx/conf.d/website.conf:ro
     links:
-      - minio
-      - django
+      - s3
+      - website
     command: ['nginx', '-g', 'daemon off;']
     build:
-      context: "."
+      context: "docker/nginx"
       platforms:
         - "linux/amd64"
-  django:
-    container_name: rc_django
-    image: rphlo/routechoices-dev-server
+  website:
+    container_name: website_rc
+    build: docker/website
     stop_signal: SIGINT
     volumes:
-      - ../:/app/:rw
+      - .:/website/:rw
     ports:
       - "2000:2000"
       - "2001:2001"
@@ -70,6 +81,6 @@ services:
       - "2002"
     links:
       - db
-      - minio
+      - s3
       - smtp
     command: ["gunicorn", "-c", "bin/gunicorn.conf.py", "--bind", ":8000", "--workers", "${NUM_PROCESSES:-3}", "--threads", "${NUM_PROCESSES:-3}", "--reload", "routechoices.${WSGI_FILE:-wsgi}:application",]

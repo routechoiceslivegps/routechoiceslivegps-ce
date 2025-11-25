@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
 from routechoices.core.models import Event
-from routechoices.lib.helpers import distance_latlon
+from routechoices.lib.helpers import distance_between_locations
 
 
 class Command(BaseCommand):
@@ -39,11 +39,7 @@ class Command(BaseCommand):
                     break
                 if prev_point:
                     total_distance += (
-                        distance_latlon(
-                            {"lat": point[1], "lon": point[2]},
-                            {"lat": prev_point[1], "lon": prev_point[2]},
-                        )
-                        / 1000
+                        distance_between_locations(point, prev_point) / 1000
                     )
                 if max_dist and total_distance > max_dist:
                     crop_starttime = point[0]

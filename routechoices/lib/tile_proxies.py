@@ -11,7 +11,7 @@ from pyproj import Transformer
 from routechoices.lib import cache
 
 from .slippy_tiles import (
-    tile_xy_to_north_west_latlon,
+    tile_xy_to_north_west_wgs84,
 )
 
 TILE_CACHE_TIMEOUT = 7 * 24 * 3600  # 1 days
@@ -24,26 +24,25 @@ class CustomCrsWms2WebMercatorWmtsProxy:
         self.url = url
         self.session = requests.Session(impersonate="chrome")
 
-    def wgs84_to_crs(self, lat, lon):
+    def wgs84_to_crs(self, wgs84_coordinate):
+        lat, lon = wgs84_coordinate.latlon
         return Transformer.from_crs(
             "+proj=latlon",
             self.proj_def,
         ).transform(lon, lat)
 
-    def tile_xy_crs_corners(self, z, x, y):
-        north_west = self.wgs84_to_crs(*tile_xy_to_north_west_latlon(x, y, z))
-        north_east = self.wgs84_to_crs(*tile_xy_to_north_west_latlon(x + 1, y, z))
-        south_east = self.wgs84_to_crs(*tile_xy_to_north_west_latlon(x + 1, y + 1, z))
-        south_west = self.wgs84_to_crs(*tile_xy_to_north_west_latlon(x, y + 1, z))
+    def tile_xy_crs_bound(self, z, x, y):
+        north_west = self.wgs84_to_crs(tile_xy_to_north_west_wgs84(x, y, z))
+        north_east = self.wgs84_to_crs(tile_xy_to_north_west_wgs84(x + 1, y, z))
+        south_east = self.wgs84_to_crs(tile_xy_to_north_west_wgs84(x + 1, y + 1, z))
+        south_west = self.wgs84_to_crs(tile_xy_to_north_west_wgs84(x, y + 1, z))
         return north_west, north_east, south_east, south_west
 
     def get_tile(self, z, x, y):
         cache_key = f"tile_proxy:wms2web_output_tile:{self.url}:{x}:{y}:{z}"
         if cached := cache.get(cache_key):
             return cached
-        north_west, north_east, south_east, south_west = self.tile_xy_crs_corners(
-            z, x, y
-        )
+        north_west, north_east, south_east, south_west = self.tile_xy_crs_bound(z, x, y)
         min_x = min(north_west[0], north_east[0], south_east[0], south_west[0])
         max_x = max(north_west[0], north_east[0], south_east[0], south_west[0])
         min_y = min(north_west[1], north_east[1], south_east[1], south_west[1])
@@ -124,7 +123,8 @@ class CustomCrsWmts2WebMercatorWmtsProxy:
         self.url = url
         self.session = requests.Session(impersonate="chrome")
 
-    def wgs84_to_crs(self, lon, lat):
+    def wgs84_to_crs(self, wgs84_coordinate):
+        lat, lon = wgs84_coordinate.latlon
         return Transformer.from_crs(
             "+proj=latlon",
             self.proj_def,
@@ -142,9 +142,9 @@ class CustomCrsWmts2WebMercatorWmtsProxy:
         y = self.y_offset - tile_y * scale
         return (x, y)
 
-    def latlon_to_crs_tile_coordinates(self, lat, lon, z):
+    def wgs84_to_crs_tile_coordinates(self, wgs84_coordinate, z):
         zoom = z - self.z_offset
-        x, y = self.wgs84_to_crs(lon, lat)
+        x, y = self.wgs84_to_crs(wgs84_coordinate)
         tile_x, tile_y = self.crs_to_tile_xy(x, y, zoom)
         x_min, y_max = self.crs_tile_xy_to_crs_north_west_coords(tile_x, tile_y, zoom)
         x_max, y_min = self.crs_tile_xy_to_crs_north_west_coords(
@@ -182,8 +182,8 @@ class CustomCrsWmts2WebMercatorWmtsProxy:
         if cached := cache.get(cache_key):
             return cached
         try:
-            north, west = tile_xy_to_north_west_latlon(x, y, z)
-            south, east = tile_xy_to_north_west_latlon(x + 1, y + 1, z)
+            north, west = tile_xy_to_north_west_wgs84(x, y, z).latlon
+            south, east = tile_xy_to_north_west_wgs84(x + 1, y + 1, z).latlon
 
             nw_x, nw_y, nw_tile_x, nw_tile_y = self.latlon_to_crs_tile_coordinates(
                 north, west, z

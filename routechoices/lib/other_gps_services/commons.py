@@ -144,7 +144,7 @@ class ThirdPartyTrackingSolutionWithProxy(ThirdPartyTrackingSolution):
             defaults={
                 "width": tmp_map.width,
                 "height": tmp_map.height,
-                "corners_coordinates": tmp_map.corners_coordinates,
+                "calibration_string": tmp_map.calibration_string,
             },
         )
         if map_file := self.get_map_file():

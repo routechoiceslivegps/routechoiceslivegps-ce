@@ -2170,8 +2170,8 @@ function RCEvent(infoURL, clockURL, locale) {
 				const runnerPoints = [];
 				for (const competitor of response.competitors) {
 					let route = null;
-					if (competitor.encoded_data) {
-						route = PositionArchive.fromEncoded(competitor.encoded_data);
+					if (competitor.locations_encoded) {
+						route = PositionArchive.fromEncoded(competitor.locations_encoded);
 						if (response.partial && competitorRoutes[competitor.id]) {
 							const newLocs = route.getArray();
 							for (const loc of newLocs) {

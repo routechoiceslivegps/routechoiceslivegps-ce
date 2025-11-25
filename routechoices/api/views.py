@@ -55,7 +55,6 @@ from routechoices.lib import cache
 from routechoices.lib.duration_constants import (
     DURATION_ONE_MINUTE,
 )
-from routechoices.lib.globalmaptiles import GlobalMercator
 from routechoices.lib.helpers import (
     epoch_to_datetime,
     get_image_mime_from_request,
@@ -81,7 +80,6 @@ from routechoices.lib.validators import (
 )
 
 logger = logging.getLogger(__name__)
-GLOBAL_MERCATOR = GlobalMercator()
 
 api_GET_view = api_view(["GET"])
 api_GET_HEAD_view = api_view(["GET", "HEAD"])
@@ -1125,7 +1123,7 @@ def competitor_route_upload(request, competitor_id):
                     "competitors": [
                         {
                             "id": "pwaCro4TErI",
-                            "encoded_data": "<encoded data>",
+                            "locations_encoded": "<encoded data>",
                             "name": "Olav Lundanes (Halden SK)",
                             "short_name": "Halden SK",
                             "start_time": "2019-06-15T20:00:00Z",
@@ -1182,15 +1180,15 @@ def event_data(request, event_id):
     competitors_data = []
 
     for competitor, from_date, end_date in event.iterate_competitors():
-        encoded_data = ""
+        locations_encoded = ""
         if competitor.device_id:
-            encoded_data, nb_pts = competitor.device.get_locations_between_dates(
+            locations_encoded, nb_pts = competitor.device.get_locations_between_dates(
                 from_date, end_date, encode=True
             )
             total_nb_pts += nb_pts
         competitor_data = {
             "id": competitor.aid,
-            "encoded_data": encoded_data,
+            "locations_encoded": locations_encoded,
             "name": competitor.name,
             "short_name": competitor.short_name,
             "start_time": competitor.start_time,
@@ -1296,13 +1294,13 @@ def event_new_data(request, event_id, key):
             diff["id"] = competitor.get("id")
             if "categories" in diff:
                 diff["categories"] = diff["categories"].split(" ")
-            if "encoded_data" in diff:
-                if old_location_encoded := old_match.get("encoded_data"):
-                    diff["encoded_data"] = gps_data_codec.encoded_diff(
-                        old_location_encoded, competitor.get("encoded_data")
+            if "locations_encoded" in diff:
+                if old_location_encoded := old_match.get("locations_encoded"):
+                    diff["locations_encoded"] = gps_data_codec.encoded_diff(
+                        old_location_encoded, competitor.get("locations_encoded")
                     )
                 else:
-                    diff["encoded_data"] = competitor.get("encoded_data")
+                    diff["locations_encoded"] = competitor.get("locations_encoded")
             competitors_data.append(diff)
         else:
             competitors_data.append(competitor)
@@ -1462,7 +1460,7 @@ def locations_api_gw(request):
     device_id = str(device_id)
     if re.match(r"^[0-9]+$", device_id):
         if secret_provided not in settings.POST_LOCATION_SECRETS and (
-            not request.user.is_authenticated or not request.user.is_staff
+            not request.user.is_authenticated or not request.user.is_superuser
         ):
             raise PermissionDenied(
                 "Authentication Failed. Only validated apps are allowed"
@@ -1607,7 +1605,7 @@ def create_device_id(request):
         return Response(
             {"status": "ok", "device_id": device.aid, "imei": imei}, status=status_code
         )
-    if not request.user.is_authenticated or not request.user.is_staff:
+    if not request.user.is_authenticated or not request.user.is_superuser:
         raise PermissionDenied(
             "Authentication Failed, Only validated apps can create new device IDs"
         )
@@ -1800,7 +1798,7 @@ def event_map_download(request, event_id, index="1", **kwargs):
     resp = serve_image_from_s3(
         request,
         raster_map.image,
-        (f"{event.name} - {title}_" f"{raster_map.corners_coordinates_string}_"),
+        (f"{event.name} - {title}_" f"{raster_map.calibration_string_for_naming}_"),
         mime=mime,
     )
     return resp
@@ -1949,20 +1947,20 @@ def two_d_rerun_race_status(request):
         "maph": raster_map.height,
         "calibration": [
             [
-                raster_map.bound["top_left"]["lon"],
-                raster_map.bound["top_left"]["lat"],
+                raster_map.bound[0].longitude,
+                raster_map.bound[0].latitude,
                 0,
                 0,
             ],
             [
-                raster_map.bound["top_right"]["lon"],
-                raster_map.bound["top_right"]["lat"],
+                raster_map.bound[1].longitude,
+                raster_map.bound[1].latitude,
                 raster_map.width,
                 0,
             ],
             [
-                raster_map.bound["bottom_left"]["lon"],
-                raster_map.bound["bottom_left"]["lat"],
+                raster_map.bound[2].longitude,
+                raster_map.bound[2].latitude,
                 0,
                 raster_map.height,
             ],
@@ -2156,7 +2154,7 @@ def third_party_event_data(request, provider, uid):
         output["competitors"].append(
             {
                 "id": c_id,
-                "encoded_data": gps_data_codec.encode(locs),
+                "locations_encoded": gps_data_codec.encode(locs),
                 "name": competitor.name,
                 "short_name": competitor.short_name,
                 "start_time": competitor.start_time,
@@ -2219,43 +2217,6 @@ class EffortSerializer(serializers.ModelSerializer):
 
 
 @swagger_auto_schema(
-    method="get",
-    auto_schema=None,
-)
-@api_GET_view
-@permission_classes([IsAuthenticated])
-def md_map_dl(request, aid):
-    effort = get_object_or_404(
-        Competitor.objects.filter(
-            event__club__is_personal_page=True
-        ).prefetch_related(
-            "event", "event__map", "device",
-        ),
-        aid=aid,
-    )
-    show_header = request.query_params.get("show_header", False)
-    show_route = request.query_params.get("show_route", False)
-    out_bounds = request.query_params.get("out_bounds", False)
-    mime_type = "image/jpeg"
-    if show_header or show_route:
-        img = effort.mapdump_effort_image(show_header, show_route)
-    elif out_bounds:
-        img = effort.mapdump_effort_image(False, False)
-    else:
-        return serve_image_from_s3(
-            request,
-            effort.event.map.image,
-            effort.event.name,
-            mime=mime_type,
-        )
-    response = HttpResponse(img, content_type=mime_type)
-    response["Content-Disposition"] = set_content_disposition(
-        f"{event.name}.{mime_type[6:]}", dl=False
-    )
-    return response
-
-
-@swagger_auto_schema(
     method="post",
     auto_schema=None,
 )
@@ -2273,7 +2234,7 @@ def md_create_effort_view(request):
     map_corners_coords = request.data.get("map_image_corners_coords")
     map = Map(
         name=f"{effort_name} map",
-        corners_coordinates=map_corners_coords,
+        calibration_string=map_corners_coords,
     )
     map.image.save(
         "tmp_name",
@@ -2285,14 +2246,14 @@ def md_create_effort_view(request):
     device = Device(virtual=True)
     device.add_locations(gps_data)
     device.save()
-    
+
     trk_points = device.locations
-    
+
     event = Event(
         name=effort_name,
         slug=short_random_slug(),
         start_date=epoch_to_datetime(trk_points[0][0]),
-        end_date=epoch_to_dateime(trk_points[-1][0]),
+        end_date=epoch_to_datetime(trk_points[-1][0]),
         map=map,
     )
     event.save()
@@ -2304,7 +2265,4 @@ def md_create_effort_view(request):
         event=event,
         device=device,
     )
-    return Response(
-        EffortSerializer(effort).data, status_code=status.HTTP_201_CREATED
-    )
-
+    return Response(EffortSerializer(effort).data, status_code=status.HTTP_201_CREATED)

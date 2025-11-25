@@ -253,21 +253,4 @@ urlpatterns = [
         "webhooks/",
         include(("routechoices.webhooks.urls", "webhooks"), namespace="webhooks"),
     ),
-    path(
-        "mapdump",
-        include(
-            [
-                re_path(
-                    r"^\/map\-(?P<aid>[0-9a-zA-Z_-]+).jpg$",
-                    views.md_map_dl,
-                    name="md_map_dl",
-                ),
-                path(
-                    "/new",
-                    views.md_create_effort_view,
-                    name="md_create_effort_view",
-                ),
-            ]
-        ),
-    ),
 ]

@@ -1,16 +1,12 @@
 import json
 import math
-import os.path
-import shutil
 import tempfile
-import zipfile
 from io import BytesIO
 from zoneinfo import ZoneInfo
 
 import arrow
 import geojson_validator
 import gpxpy
-from curl_cffi import requests
 from defusedxml import minidom
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -47,9 +43,11 @@ from routechoices.lib.helpers import (
     check_dns_records,
     get_aware_datetime,
     initial_of_name,
-    is_valid_pil_image,
 )
-from routechoices.lib.kmz import extract_ground_overlay_info
+from routechoices.lib.kmz import (
+    extract_kml,
+    get_maps_from_kml,
+)
 from routechoices.lib.validators import validate_domain_name, validate_nice_slug
 
 
@@ -311,14 +309,14 @@ class MapForm(ModelForm):
 
     class Meta:
         model = Map
-        fields = ["name", "image", "corners_coordinates"]
+        fields = ["name", "image", "calibration_string"]
 
-    def clean_corners_coordinates(self):
-        cc = self.cleaned_data["corners_coordinates"]
-        cs = cc.split(",")
-        if len(cs) != 8:
-            raise ValidationError("Invalid format")
+    def clean_calibration_string(self):
+        cc = self.cleaned_data["calibration_string"]
         try:
+            cs = cc.split(",")
+            if len(cs) != 8:
+                raise ValueError()
             return ",".join([f"{float(c):.5f}" for c in cs])
         except Exception:
             raise ValidationError("Invalid format")
@@ -835,68 +833,17 @@ class UploadKmzForm(Form):
     def clean_file(self):
         file = self.cleaned_data["file"]
         tmp_extract_dir = None
-        is_compressed = False
         if file.name.lower().endswith(".kmz"):
-            is_compressed = True
             tmp_extract_dir = tempfile.mkdtemp("_kmz")
             try:
-                zf = zipfile.ZipFile(file)
-                zf.extractall(tmp_extract_dir)
-                if os.path.exists(os.path.join(tmp_extract_dir, "Doc.kml")):
-                    doc_file = "Doc.kml"
-                elif os.path.exists(os.path.join(tmp_extract_dir, "doc.kml")):
-                    doc_file = "doc.kml"
-                else:
-                    raise Exception("No valid doc.kml file")
-                with open(
-                    os.path.join(tmp_extract_dir, doc_file), "r", encoding="utf-8"
-                ) as f:
-                    kml = f.read().encode("utf8")
+                kml = extract_kml(file, tmp_extract_dir)
             except Exception:
-                raise ValidationError("Could not extract maps from this file.")
+                raise ValidationError("Invalid KMZ: could not extract .kml")
         elif file.name.lower().endswith(".kml"):
             kml = file.read()
-
-        new_maps = []
-        try:
-            overlays = extract_ground_overlay_info(kml)
-        except Exception:
-            raise ValidationError("Invalid File")
-        if not overlays:
-            raise ValidationError("Could not find any Ground Overlays in that file!")
-
-        for data in overlays:
-            name, image_path, corners_coords = data
-            file_data = None
-            if not name:
-                name = "Untitled"
-            if image_path.startswith("http://") or image_path.startswith("https://"):
-                try:
-                    r = requests.get(image_path, timeout=10)
-                    r.raise_for_status()
-                except Exception:
-                    raise ValidationError("File contains an unreachable image URL")
-                file_data = r.content
-            elif is_compressed:
-                image_path = os.path.abspath(os.path.join(tmp_extract_dir, image_path))
-                if not image_path.startswith(tmp_extract_dir):
-                    raise ValidationError("File contains an illegal image path")
-                with open(image_path, "rb") as fp:
-                    file_data = fp.read()
-            else:
-                raise ValidationError("File contains an illegal image path")
-            if not is_valid_pil_image(BytesIO(file_data)):
-                continue
-            image_file = File(BytesIO(file_data))
-            new_map = Map(
-                name=name,
-                corners_coordinates=corners_coords,
-            )
-            new_map.image.save("file", image_file, save=False)
-            new_maps.append(new_map)
-        if tmp_extract_dir:
-            shutil.rmtree(tmp_extract_dir, ignore_errors=True)
-        self.cleaned_data["extracted_maps"] = new_maps
+        new_maps = list(get_maps_from_kml(kml, tmp_extract_dir))
+        if not new_maps:
+            raise ValidationError("Could not find any Maps in that file!")
         return file
 
 

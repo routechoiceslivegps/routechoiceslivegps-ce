@@ -113,7 +113,7 @@ def validate_domain_slug(slug):
         raise ValidationError(errors)
 
 
-def validate_corners_coordinates(val):
+def validate_calibration_string(val):
     cal_values = val.split(",")
     if len(cal_values) != 8:
         raise ValidationError(

@@ -5,8 +5,6 @@ import math
 import os.path
 import re
 import socket
-import subprocess
-import tempfile
 import time
 from datetime import timedelta
 from io import BytesIO
@@ -25,17 +23,16 @@ import orjson as json
 from allauth.account.models import EmailAddress
 from dateutil.parser import parse as parse_date
 from django.conf import settings
-from django.contrib.auth.models import User, AnonymousUser
+from django.contrib.auth.models import AnonymousUser, User
 from django.contrib.gis.geos import LinearRing, Polygon
-from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import BadRequest, PermissionDenied, ValidationError
 from django.core.files.base import ContentFile, File
 from django.core.mail import EmailMessage
 from django.core.paginator import Paginator
 from django.core.validators import MaxValueValidator, MinValueValidator, validate_slug
 from django.db import models
-from django.db.models import F, Max, Q, Value
-from django.db.models.functions import Cast, ExtractMonth, ExtractYear, Upper
+from django.db.models import F, Max, Q
+from django.db.models.functions import ExtractMonth, ExtractYear, Upper
 from django.db.models.signals import post_delete, pre_delete, pre_save
 from django.dispatch import receiver
 from django.http.response import Http404
@@ -51,19 +48,23 @@ from routechoices.lib.duration_constants import (
     DURATION_ONE_MONTH,
 )
 from routechoices.lib.geojson import get_geojson_coordinates
-from routechoices.lib.globalmaptiles import GlobalMercator
 from routechoices.lib.helpers import (
     COUNTRIES,
+    Point,
+    Wgs84Coordinate,
+    XYMeters,
     adjugate_matrix,
     avg_angles,
+    calibration_string_from_wgs84_bound,
     country_code_at_coords,
     delete_domain,
-    distance_latlon,
+    distance_between_locations,
     epoch_to_datetime,
     general_2d_projection,
     get_current_site,
     gpsseuranta_encode_data,
     int_base32,
+    meters_to_wgs84,
     project,
     random_device_id,
     random_key,
@@ -75,16 +76,17 @@ from routechoices.lib.helpers import (
     simplify_periods,
     time_base32,
     timezone_at_coords,
+    triangle_area,
+    wgs84_to_meters,
 )
 from routechoices.lib.jxl import register_jxl_opener
 from routechoices.lib.storages import OverwriteImageStorage
 from routechoices.lib.validators import (
     color_hex_validator,
-    validate_corners_coordinates,
+    validate_calibration_string,
     validate_domain_name,
     validate_domain_slug,
     validate_emails,
-    validate_esn,
     validate_imei,
     validate_latitude,
     validate_longitude,
@@ -95,8 +97,6 @@ register_jxl_opener()
 
 logger = logging.getLogger(__name__)
 
-GLOBAL_MERCATOR = GlobalMercator()
-
 EVENT_CACHE_INTERVAL_LIVE = 5
 EVENT_CACHE_INTERVAL_ARCHIVED = 7 * 24 * 3600
 
@@ -105,6 +105,9 @@ WEBP_MAX_SIZE = 16383
 LOCATION_TIMESTAMP_INDEX = 0
 LOCATION_LATITUDE_INDEX = 1
 LOCATION_LONGITUDE_INDEX = 2
+
+WGS84_LATITUDE_INDEX = 0
+WGS84_LONGITUDE_INDEX = 1
 
 END_FREE_OCLUB = parse_date("2026-01-01T00:00:00Z")
 
@@ -144,7 +147,7 @@ class SomewhereOnEarth:
         return "🌍"
 
 
-class GPSSeurantaClient:
+class GPSSeurantaNetClient:
     def connect(self):
         if not settings.GPSSEURANTA_SERVER_ADDR:
             return
@@ -167,23 +170,7 @@ class GPSSeurantaClient:
                 break
 
 
-gpsseuranta_client = GPSSeurantaClient()
-
-
-class Point:
-    def __init__(self, x, y=None):
-        if isinstance(x, tuple):
-            self.x = x[0]
-            self.y = x[1]
-        elif isinstance(x, dict):
-            self.x = x.get("x")
-            self.y = x.get("y")
-        else:
-            self.x = x
-            self.y = y
-
-    def __repr__(self):
-        return f"x: {self.x}, y:{self.y}"
+gps_seuranta_net_client = GPSSeurantaNetClient()
 
 
 def logo_upload_path(instance=None, file_name=None):
@@ -540,6 +527,7 @@ User.has_personal_page = property(has_user_personal_page)
 AnonymousUser.personal_page = None
 AnonymousUser.has_personal_page = False
 
+
 def map_upload_path(instance=None, file_name=None):
     tmp_path = ["maps"]
     time_hash = time_base32()
@@ -580,20 +568,12 @@ class Map(models.Model, SomewhereOnEarth):
         blank=True,
         editable=False,
     )
-    corners_coordinates = models.CharField(
+    calibration_string = models.CharField(
         max_length=255,
         help_text="Latitude and longitude of map corners separated by commas "
         "in following order Top Left, Top right, Bottom Right, Bottom left. "
         "eg: 60.519,22.078,60.518,22.115,60.491,22.112,60.492,22.073",
-        validators=[validate_corners_coordinates],
-    )
-    _corners_coordinates = models.GeneratedField(
-        expression=Cast(
-            StringToArray(F("corners_coordinates"), Value(",")),
-            output_field=ArrayField(models.FloatField(), size=8),
-        ),
-        output_field=ArrayField(models.FloatField(), size=8),
-        db_persist=True,
+        validators=[validate_calibration_string],
     )
 
     class Meta:
@@ -676,98 +656,69 @@ class Map(models.Model, SomewhereOnEarth):
 
     @property
     def hash(self):
-        return shortsafe64encodedsha(
-            f"{self.path}:{self.corners_coordinates}:20230420"
-        )[:8]
+        return shortsafe64encodedsha(f"{self.path}:{self.calibration_string}:20230420")[
+            :8
+        ]
 
     @cached_property
-    def corners_coordinates_array(self):
-        if not self._is_pk_set():
-            return [float(x) for x in self.corners_coordinates.split(",")]
-        else:
-            return self._corners_coordinates
+    def calibration_values(self):
+        return [float(x) for x in self.calibration_string.split(",")]
 
     @property
-    def corners_coordinates_string(self):
+    def calibration_string_for_naming(self):
         return np.array2string(
-            np.array(self.corners_coordinates_array), separator="_", precision=5
+            np.array(self.calibration_values), separator="_", precision=5
         )[1:-1]
 
-    @cached_property
-    def bound(self):
-        coords = self.corners_coordinates_array
-        return {
-            "top_left": {"lat": coords[0], "lon": coords[1]},
-            "top_right": {"lat": coords[2], "lon": coords[3]},
-            "bottom_right": {"lat": coords[4], "lon": coords[5]},
-            "bottom_left": {"lat": coords[6], "lon": coords[7]},
-        }
-
     @property
-    def size(self):
-        width, height = self.quick_size
-        return {"width": width, "height": height}
+    def bound(self):
+        vals = self.calibration_values
+        return [Wgs84Coordinate(vals[0 + i * 2 : 2 + i * 2]) for i in range(4)]
+
+    @bound.setter
+    def bound(self, value):
+        self.calibration_string = calibration_string_from_wgs84_bound(value)
 
     @property
     def min_lon(self):
-        return min(
-            self.bound["top_left"]["lon"],
-            self.bound["bottom_left"]["lon"],
-            self.bound["bottom_right"]["lon"],
-            self.bound["top_right"]["lon"],
-        )
+        return min([c.longitude for c in self.bound])
 
     @property
     def max_lon(self):
-        return max(
-            self.bound["top_left"]["lon"],
-            self.bound["bottom_left"]["lon"],
-            self.bound["bottom_right"]["lon"],
-            self.bound["top_right"]["lon"],
-        )
+        return max([c.longitude for c in self.bound])
 
     @property
     def min_lat(self):
-        return min(
-            self.bound["top_left"]["lat"],
-            self.bound["bottom_left"]["lat"],
-            self.bound["bottom_right"]["lat"],
-            self.bound["top_right"]["lat"],
-        )
+        return min([c.latitude for c in self.bound])
 
     @property
     def max_lat(self):
-        return max(
-            self.bound["top_left"]["lat"],
-            self.bound["bottom_left"]["lat"],
-            self.bound["bottom_right"]["lat"],
-            self.bound["top_right"]["lat"],
-        )
+        return max([c.latitude for c in self.bound])
 
     @property
     def max_xy(self):
-        return GLOBAL_MERCATOR.latlon_to_meters(
-            {"lat": self.max_lat, "lon": self.max_lon}
-        )
+        return wgs84_to_meters(self.max_lat, self.max_lon)
 
     @property
     def min_xy(self):
-        return GLOBAL_MERCATOR.latlon_to_meters(
-            {"lat": self.min_lat, "lon": self.min_lon}
-        )
+        return wgs84_to_meters(self.min_lat, self.min_lon)
 
     @property
     def alignment_points(self):
         width, height = self.quick_size
-        a1 = Point(0, 0)
-        b1 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["top_left"]))
-        a2 = Point(0, height)
-        b2 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["bottom_left"]))
-        a3 = Point(width, 0)
-        b3 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["top_right"]))
-        a4 = Point(width, height)
-        b4 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["bottom_right"]))
-        return a1, a2, a3, a4, b1, b2, b3, b4
+        map_corners = (
+            Point(0, 0),
+            Point(0, height),
+            Point(width, 0),
+            Point(width, height),
+        )
+        map_corners_xy_meters = (
+            wgs84_to_meters(self.bound["top_left"]),
+            wgs84_to_meters(self.bound["bottom_left"]),
+            wgs84_to_meters(self.bound["top_right"]),
+            wgs84_to_meters(self.bound["bottom_right"]),
+        )
+        return map_corners, map_corners_xy_meters
 
     @property
     def matrix_3d(self):
@@ -781,23 +732,23 @@ class Map(models.Model, SomewhereOnEarth):
         return adjugate_matrix(self.matrix_3d)
 
     @cached_property
-    def map_xy_to_spherical_mercator(self):
-        return lambda x, y: project(self.matrix_3d, x, y)
+    def map_xy_to_spherical_mercator(self, xy):
+        return lambda xy: XYMeters(project(self.matrix_3d, xy))
 
     @cached_property
     def spherical_mercator_to_map_xy(self):
-        return lambda x, y: project(self.matrix_3d_inverse, x, y)
+        return lambda xy: project(self.matrix_3d_inverse, xy)
 
-    def wsg84_to_map_xy(self, lat, lon, round_values=False):
-        world_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": lat, "lon": lon})
-        map_xy = self.spherical_mercator_to_map_xy(world_xy["x"], world_xy["y"])
+    def wsg84_to_map_xy(self, wgs84_coordinate, round_values=False):
+        xy_meter = Wgs84Coordinate(wgs84_coordinate).xy_meters
+        image_xy = self.spherical_mercator_to_image_xy(xy_meter)
         if round_values:
-            return round(map_xy[0]), round(map_xy[1])
-        return map_xy
+            return image_xy.round(5)
+        return image_xy
 
-    def map_xy_to_wsg84(self, x, y):
-        mx, my = self.map_xy_to_spherical_mercator(x, y)
-        return GLOBAL_MERCATOR.meters_to_latlon({"x": mx, "y": my})
+    def map_xy_to_wsg84(self, xy):
+        xy_meters = self.map_xy_to_spherical_mercator(xy)
+        return xy_meters.wgs84_coordinate
 
     @property
     def center(self):
@@ -812,21 +763,18 @@ class Map(models.Model, SomewhereOnEarth):
     @cached_property
     def area(self):
         # Area in m^2
-        width, height = self.quick_size
-        ll_a = self.map_xy_to_wsg84(0, 0)
-        ll_b = self.map_xy_to_wsg84(width, 0)
-        ll_c = self.map_xy_to_wsg84(width, height)
-        ll_d = self.map_xy_to_wsg84(0, height)
+        tl, tr, bl, br = self.bound
 
-        a = distance_latlon(ll_a, ll_b)
-        b = distance_latlon(ll_b, ll_c)
-        c = distance_latlon(ll_c, ll_a)
-        d = distance_latlon(ll_a, ll_d)
-        e = distance_latlon(ll_d, ll_c)
+        side_a = distance_between_locations(tl, tr)
+        side_b = distance_between_locations(tr, br)
+        side_c = distance_between_locations(bl, bl)
+        side_d = distance_between_locations(bl, tl)
+        diagonal = distance_between_locations(tl, br)
 
-        return ((a + b + c) * (a + b - c) * (a + c - b) * (b + c - a)) ** 0.5 / 4 + (
-            (c + d + e) * (c + d - e) * (c + e - d) * (e + d - c)
-        ) ** 0.5 / 4
+        triangle_a = (side_a, side_b, diagonal)
+        triangle_b = (side_c, side_d, diagonal)
+
+        return triangle_area(triangle_a) + triangle_area(triangle_b)
 
     @cached_property
     def resolution(self):
@@ -843,27 +791,31 @@ class Map(models.Model, SomewhereOnEarth):
         r = self.resolution / meters_per_pixel_at_zoom_18
         return math.floor(math.log2(r)) + 18
 
+    @property
+    def corners_xy(self):
+        width, height = self.quick_size
+        return ((0, 0), (width, 0), (width, height), (0, height))
+
     @cached_property
     def rotation(self):
         width, height = self.quick_size
-        tl = self.map_xy_to_spherical_mercator(0, 0)
-        tr = self.map_xy_to_spherical_mercator(width, 0)
-        br = self.map_xy_to_spherical_mercator(width, height)
-        bl = self.map_xy_to_spherical_mercator(0, height)
+        tl, tr, br, bl = (corner.xy_meters for corner in self.bound)
 
-        rot_vert_left = (
-            (math.atan2(tl[1] - bl[1], tl[0] - bl[0]) - math.pi / 2) * 180 / math.pi
-        )
-        rot_vert_right = (
-            (math.atan2(tr[1] - br[1], tr[0] - br[0]) - math.pi / 2) * 180 / math.pi
-        )
-        rot_vert = (avg_angles(rot_vert_left, rot_vert_right)) % 360
+        left_diff = Point(tl.x - bl.x, tl.y - bl.y)
+        right_diff = Point(tr.x - br.x, tr.y - br.y)
+        top_diff = Point(tl.x - tr.x, tl.y - tr.y)
+        bottom_diff = Point(br.x - bl.x, br.y - bl.y)
 
-        rot_hori_top = (math.atan2(tr[1] - tl[1], tr[0] - tl[0])) * 180 / math.pi
-        rot_hori_bottom = (math.atan2(br[1] - bl[1], br[0] - bl[0])) * 180 / math.pi
-        rot_hori = avg_angles(rot_hori_top, rot_hori_bottom) % 360
+        left_rot = (math.atan2(*left_diff.xy) - math.pi / 2) * 180 / math.pi
+        right_rot = (math.atan2(*right_diff.xy) - math.pi / 2) * 180 / math.pi
 
-        return round(avg_angles(rot_vert, rot_hori), 2)
+        top_rot = (math.atan2(*top_diff)) * 180 / math.pi
+        bottom_rot = (math.atan2(bottom_diff.xy)) * 180 / math.pi
+
+        vertical_rot = (avg_angles(left_rot, right_rot)) % 360
+        horizontal_rot = avg_angles(top_rot, bottom_rot) % 360
+
+        return round(avg_angles(vertical_rot, horizontal_rot), 2)
 
     @property
     def north_declination(self):
@@ -1075,10 +1027,10 @@ class Map(models.Model, SomewhereOnEarth):
             min_lon = min(min_lon, min(lons))
             max_lon = max(max_lon, max(lons))
 
-        tl_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": max_lat, "lon": min_lon})
-        tr_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": max_lat, "lon": max_lon})
-        br_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": min_lat, "lon": max_lon})
-        bl_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": min_lat, "lon": min_lon})
+        tl_xy = wgs84_to_meters((max_lat, min_lon))
+        tr_xy = wgs84_to_meters((max_lat, max_lon))
+        br_xy = wgs84_to_meters((min_lat, max_lon))
+        bl_xy = wgs84_to_meters((min_lat, min_lon))
 
         res_scale = 4
         MAX_SIZE = 4000
@@ -1093,24 +1045,14 @@ class Map(models.Model, SomewhereOnEarth):
         width = (tr_xy["x"] - tl_xy["x"]) / scale + 2 * offset
         height = (tr_xy["y"] - br_xy["y"]) / scale + 2 * offset
 
-        corners = [
-            GLOBAL_MERCATOR.meters_to_latlon(
-                {"x": tl_xy["x"] - offset * scale, "y": tl_xy["y"] + offset * scale}
-            ),
-            GLOBAL_MERCATOR.meters_to_latlon(
-                {"x": tr_xy["x"] + offset * scale, "y": tr_xy["y"] + offset * scale}
-            ),
-            GLOBAL_MERCATOR.meters_to_latlon(
-                {"x": br_xy["x"] + offset * scale, "y": br_xy["y"] - offset * scale}
-            ),
-            GLOBAL_MERCATOR.meters_to_latlon(
-                {"x": bl_xy["x"] - offset * scale, "y": bl_xy["y"] - offset * scale}
-            ),
+        bound = [
+            meters_to_wgs84([tl_xy["x"] - offset * scale, tl_xy["y"] + offset * scale]),
+            meters_to_wgs84([tr_xy["x"] + offset * scale, tr_xy["y"] + offset * scale]),
+            meters_to_wgs84([br_xy["x"] + offset * scale, br_xy["y"] - offset * scale]),
+            meters_to_wgs84([bl_xy["x"] - offset * scale, bl_xy["y"] - offset * scale]),
         ]
 
-        new_map.corners_coordinates = ",".join(
-            f"{round(c['lat'], 5)},{round(c['lon'], 5)}" for c in corners
-        )
+        new_map.bound = bound
 
         im = Image.new(
             "RGBA",
@@ -1224,7 +1166,7 @@ class Map(models.Model, SomewhereOnEarth):
         map_obj.image.save("imported_image", out_file, save=False)
         map_obj.width = width
         map_obj.height = height
-        map_obj.corners_coordinates = self.corners_coordinates
+        map_obj.calibration_string = self.calibration_string
         return map_obj
 
     def merge(self, *other_maps):
@@ -1277,7 +1219,7 @@ class Map(models.Model, SomewhereOnEarth):
             map_obj.image.save("imported_image", out_file, save=False)
             map_obj.width = w
             map_obj.height = h
-            map_obj.corners_coordinates = self.corners_coordinates
+            map_obj.calibration_string = self.calibration_string
             return map_obj.merge(*other_maps)
 
         new_image = Image.new(
@@ -1302,7 +1244,7 @@ class Map(models.Model, SomewhereOnEarth):
         new_tr = self.map_xy_to_wsg84(max_x, min_y)
         new_br = self.map_xy_to_wsg84(max_x, max_y)
         new_bl = self.map_xy_to_wsg84(min_x, max_y)
-        map_obj.corners_coordinates = f'{round(new_tl["lat"], 5)},{round(new_tl["lon"], 5)},{round(new_tr["lat"], 5)},{round(new_tr["lon"], 5)},{round(new_br["lat"], 5)},{round(new_br["lon"], 5)},{round(new_bl["lat"], 5)},{round(new_bl["lon"], 5)}'
+        map_obj.calibration_string = f'{round(new_tl["lat"], 5)},{round(new_tl["lon"], 5)},{round(new_tr["lat"], 5)},{round(new_tr["lon"], 5)},{round(new_br["lat"], 5)},{round(new_br["lon"], 5)},{round(new_bl["lat"], 5)},{round(new_bl["lon"], 5)}'
 
         return map_obj.overlay(*other_maps)
 
@@ -1627,6 +1569,7 @@ class Event(models.Model, SomewhereOnEarth):
         help_text='A <a href="//www.routechoices.com/guide/geojson" taget="_blank" rel="nofollow noopener">GeoJSON CSS</a> file.',
         storage=OverwriteImageStorage(aws_s3_bucket_name=settings.AWS_S3_BUCKET),
     )
+    freezed_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         ordering = ["-start_date", "name"]
@@ -1689,6 +1632,17 @@ class Event(models.Model, SomewhereOnEarth):
             or not self.club.admins.filter(id=user.id).exists()
         ):
             raise PermissionDenied()
+
+    def freeze(self, save=True):
+        self.freezed_at = now()
+        if save:
+            self.save()
+
+    def freezed(self):
+        return self.freezed and self.freezed_at < now()
+
+    def can_edit(self, user=None):
+        return self.club.can_modify_events and not self.freezed
 
     @classmethod
     def get_by_url(cls, url):
@@ -2345,51 +2299,6 @@ class Device(models.Model, SomewhereOnEarth):
         if deleted_location_count:
             self.add_locations(valid_locs, reset=True, save=save)
 
-    def archive(self, /, *, until, save=False):
-        last_start = None
-
-        periods_used = self.get_active_periods()
-        periods_used_till_limit = []
-        for period in periods_used:
-            end = period[1]
-            if end < until:
-                periods_used_till_limit.append(period)
-
-        if periods_used_till_limit:
-            last_start = periods_used_till_limit[-1][0]
-        periods_to_gather = periods_used_till_limit[:-1]
-
-        locs_to_archive = self.get_locations_over_periods(periods_to_gather)
-
-        if locs_to_archive:
-            archive_dev = Device(
-                aid=f"{short_random_key()}_ARC",
-                virtual=True,
-            )
-            arc_reference = DeviceArchiveReference(original=self, archive=archive_dev)
-            archive_dev.add_locations(locs_to_archive, save=False)
-            modified_competitors = [
-                c for c in self.competitor_set.all() if c.start_time < last_start
-            ]
-
-            for competitor in modified_competitors:
-                competitor.device = archive_dev
-
-            left_locations, _ = self.get_locations_between_dates(
-                last_start,
-                self.last_location_datetime,
-            )
-            self.add_locations(left_locations, reset=True, save=False)
-
-            if save:
-                archive_dev.save()
-                arc_reference.save()
-                for competitor in modified_competitors:
-                    competitor.save()
-                self.save()
-            return archive_dev
-        return None
-
     def get_locations_over_periods(self, periods):
         locs = []
         for period in periods:
@@ -2519,7 +2428,7 @@ class Device(models.Model, SomewhereOnEarth):
             for archived_event_affected in archived_events_affected:
                 archived_event_affected.invalidate_cache()
             if self.should_relay_to_gpsseuranta:
-                gpsseuranta_client.send(f"rc{self.aid}", added_locs)
+                gps_seuranta_net_client.send(f"rc{self.aid}", added_locs)
         elif save:
             self.save()
 
@@ -2673,11 +2582,11 @@ class DeviceArchiveReference(models.Model):
         Device, related_name="original_ref", on_delete=models.CASCADE
     )
     original = models.ForeignKey(
-        Device, related_name="archives_ref", on_delete=models.CASCADE
+        Device, related_name="archive_refs", on_delete=models.CASCADE
     )
 
     def __str__(self):
-        return f"Archive {self.archive.aid} of {self.original.aid}"
+        return f"Archive {self.archive.aid} of Tracker {self.original.aid}"
 
 
 class ImeiDevice(models.Model):
@@ -2836,9 +2745,24 @@ class Competitor(models.Model, SomewhereOnEarth):
         return locs
 
     @property
-    def encoded_data(self):
+    def locations_encoded(self):
         result = gps_data_codec.encode(self.locations)
         return result
+
+    def archive_device(self, save=True):
+        if not self.device:
+            return None
+        archive = Device(
+            aid=f"{short_random_key()}_ARC",
+            virtual=True,
+            locations_encoded=self.locations_encoded,
+        )
+        self.device = archive
+        if save:
+            archive.save()
+            DeviceArchiveReference.objects.create(original=self.device, archive=archive)
+            self.save()
+        return archive
 
     @property
     def gpx(self):
@@ -2870,74 +2794,38 @@ class Competitor(models.Model, SomewhereOnEarth):
 
     @property
     def duration(self):
-        if locs := self.locations:
-            return locs[-1][0] - locs[0][0]
-        return None
+        if locations := self.locations:
+            return (
+                locations[-1][LOCATION_TIMESTAMP_INDEX]
+                - locations[0][LOCATION_TIMESTAMP_INDEX]
+            )
+        return 0
 
     @property
     def distance(self):
-        if not self.locations:
-            return None
-        distance = 0
-        prev_pt = self.locations[0]
-        rad = math.pi / 180
-        for pt in self.locations[1:]:
-            dlat = pt[1] - prev_pt[1]
-            dlon = pt[2] - prev_pt[2]
-            alpha = (
-                math.sin(rad * dlat / 2) ** 2
-                + math.cos(rad * pt[1])
-                * math.cos(rad * prev_pt[1])
-                * math.sin(rad * dlon / 2) ** 2
-            )
-            distance += 12756274 * math.atan2(math.sqrt(alpha), math.sqrt(1 - alpha))
-            prev_pt = pt
+        if locations := self.locations:
+            return 0
+            distance = 0
+            prev_pt = locations[0]
+            rad = math.pi / 180
+            for pt in locations[1:]:
+                dlat = pt[LOCATION_LATITUDE_INDEX] - prev_pt[LOCATION_LATITUDE_INDEX]
+                dlon = pt[LOCATION_LONGITUDE_INDEX] - prev_pt[LOCATION_LONGITUDE_INDEX]
+                alpha = (
+                    math.sin(rad * dlat / 2) ** 2
+                    + math.cos(rad * pt[LOCATION_LATITUDE_INDEX])
+                    * math.cos(rad * prev_pt[LOCATION_LATITUDE_INDEX])
+                    * math.sin(rad * dlon / 2) ** 2
+                )
+                distance += 12756274 * math.atan2(
+                    math.sqrt(alpha), math.sqrt(1 - alpha)
+                )
+                prev_pt = pt
         return distance
 
     @property
     def locations_hash(self):
-        return shortsafe64encodedsha(self.encoded_data)[:8]
-
-    def mapdump_effort_image(self, header=True, route=True):
-        header_arg = "1" if header else "0"
-        route_arg = "1" if route else "0"
-
-        cache_key = f"mapdump:{self.event.map.hash}:{self.locations_hash}:{header_arg}:{route_arg}"
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
-        data_uri = None
-        with (
-            tempfile.NamedTemporaryFile() as map_file,
-            tempfile.NamedTemporaryFile() as track_file,
-        ):
-            map_file.write(self.event.map.data)
-            map_file.flush()
-            track_file.write(json.dumps(self.locations))
-            track_file.flush()
-            try:
-                data_uri = subprocess.check_output(
-                    [
-                        "./jstools/generate_map.js",
-                        map_file.name,
-                        self.event.map.corners_coordinates,
-                        track_file.name,
-                        self.timezone,
-                        header_arg,
-                        route_arg,
-                    ],
-                    cwd=settings.BASE_DIR,
-                )
-            except subprocess.CalledProcessError:
-                raise Exception("Internal Tool Error")
-            else:
-                header, encoded = data_uri.decode("utf-8").split(",", 1)
-                if header.startswith("data"):
-                    data = base64.b64decode(encoded)
-                    cache.set(cache_key, data, 31 * 24 * 3600)
-                    return data
-        return None
-
+        return shortsafe64encodedsha(self.locations_encoded)[:8]
 
 
 @receiver([pre_save, post_delete], sender=Competitor)
@@ -2980,54 +2868,20 @@ class FrontPageFeedback(models.Model):
         return f"Feedback from {self.name} ({self.club_name})"
 
 
-class UserSettings(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    default_device = models.ForeignKey(
-        Device,
-        related_name="default_user_set",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
-    default_name = models.CharField(max_length=64, null=True, blank=True)
-    default_short_name = models.CharField(max_length=32, null=True, blank=True)
-
-    class Meta:
-        verbose_name = "user settings"
-        verbose_name_plural = "user settings"
-
-
-User.settings = property(lambda u: UserSettings.objects.get_or_create(user=u)[0])
-
-
-class SpotFeed(models.Model):
-    feed_id = models.CharField(
-        max_length=64,
-        unique=True,
-    )
-    last_fetched = models.DateTimeField(blank=True, null=True)
-
-    def __str__(self):
-        return self.feed_id
-
-
-class SpotDevice(models.Model):
+class DeviceSharingPeriod(models.Model):
     creation_date = models.DateTimeField(auto_now_add=True)
-    messenger_id = models.CharField(
-        max_length=32,
-        unique=True,
-        validators=[
-            validate_esn,
-        ],
+    modification_date = models.DateTimeField(auto_now=True)
+    device = models.ForeignKey(Device, related_name="sharing", on_delete=models.CASCADE)
+    club = models.ForeignKey(
+        Club, related_name="shared_devices", on_delete=models.CASCADE
     )
-    device = models.OneToOneField(
-        Device, related_name="spot_device", on_delete=models.CASCADE
-    )
+    from_date = models.DateTimeField(auto_now_add=True)
+    until_date = models.DateTimeField()
 
     class Meta:
-        ordering = ["messenger_id"]
-        verbose_name = "spot device"
-        verbose_name_plural = "spot devices"
+        ordering = ["-until_date"]
+        verbose_name = "Tracker Sharing Period"
+        verbose_name_plural = "Trackers Sharing Periods"
 
     def __str__(self):
-        return self.messenger_id
+        return f"Tracker <{self.device}> sharing to Org <{self.club.slug}> from {self.from_date} until {self.until_date}"

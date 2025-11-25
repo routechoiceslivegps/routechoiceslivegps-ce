@@ -29,7 +29,7 @@ from routechoices.lib.helpers import epoch_to_datetime
 
 class EssentialApiBase(APITestCase):
     def setUp(self):
-        self.client = APIClient(HTTP_HOST="api.routechoices.dev")
+        self.client = APIClient(HTTP_HOST="api.routechoices.com")
         self.user = User.objects.create_user(
             "alice", f"alice{random.randrange(1000)}@example.com", "pa$$word123"
         )
@@ -44,7 +44,7 @@ class EssentialApiBase(APITestCase):
         prefix=None,
     ):
         url = reverse(path, host=host, kwargs=extra_kwargs, host_kwargs=host_kwargs)
-        self.assertEqual(url, f"//{prefix or host}.routechoices.dev{expected}")
+        self.assertEqual(url, f"//{prefix or host}.routechoices.com{expected}")
         return url
 
     def get_device_id(self):
@@ -93,7 +93,10 @@ class EssentialApiTestCase1(EssentialApiBase):
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
         validated_apps_user = User.objects.create_user(
-            "apps", f"apps{random.randrange(1000)}@example.com", "pa$$word123"
+            "system",
+            f"apps{random.randrange(1000)}@example.com",
+            "pa$$word123",
+            is_superuser=True,
         )
         self.client.force_login(validated_apps_user)
         res = self.client.post(url)
@@ -205,71 +208,6 @@ class EssentialApiTestCase1(EssentialApiBase):
         last_loc = device.last_location
         device.update_cached_data()
         self.assertEqual(last_loc, device.last_location)
-
-    def test_archive_device(self):
-        club = Club.objects.create(name="Test club", slug="club")
-        device = Device()
-        device.add_locations(
-            [(0, 0.00001, 0.00001), (5, 0.00001, 0.00001), (10, 0.00001, 0.00001)]
-        )
-        event1 = Event.objects.create(
-            club=club,
-            name="test1",
-            slug="abc",
-            start_date=epoch_to_datetime(-1),
-            end_date=epoch_to_datetime(1),
-        )
-        Competitor.objects.create(
-            name="A",
-            short_name="A",
-            device=device,
-            event=event1,
-        )
-        event2 = Event.objects.create(
-            club=club,
-            name="test2",
-            slug="def",
-            start_date=epoch_to_datetime(8),
-            end_date=epoch_to_datetime(12),
-        )
-        Competitor.objects.create(
-            name="A",
-            short_name="A",
-            device=device,
-            event=event2,
-        )
-
-        arc = device.archive(until=epoch_to_datetime(13))
-        self.assertEqual(arc.location_count, 1)
-        self.assertEqual(device.location_count, 1)
-
-        device.refresh_from_db()
-        arc = device.archive(until=epoch_to_datetime(7))
-        self.assertIsNone(arc)
-        self.assertEqual(device.location_count, 3)
-
-        event3 = Event.objects.create(
-            club=club,
-            name="test2",
-            slug="ghi",
-            start_date=epoch_to_datetime(4),
-            end_date=epoch_to_datetime(6),
-        )
-        Competitor.objects.create(
-            name="A",
-            short_name="A",
-            device=device,
-            event=event3,
-        )
-        device.refresh_from_db()
-        arc = device.archive(until=epoch_to_datetime(7))
-        self.assertEqual(arc.location_count, 1)
-        self.assertEqual(device.location_count, 2)
-
-        device.refresh_from_db()
-        arc = device.archive(until=epoch_to_datetime(13))
-        self.assertEqual(arc.location_count, 2)
-        self.assertEqual(device.location_count, 1)
 
     def test_clean_device(self):
         club = Club.objects.create(name="Test club", slug="club")
@@ -816,7 +754,7 @@ class EventApiTestCase(EssentialApiBase):
         raster_map = Map.objects.create(
             club=club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),
@@ -888,7 +826,7 @@ class EventApiTestCase(EssentialApiBase):
 
         res = self.client.get(url)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertNotEqual(res.data["competitors"][0]["encoded_data"], "")
+        self.assertNotEqual(res.data["competitors"][0]["locations_encoded"], "")
         self.assertIsNone(res.headers.get("X-Cache-Hit"))
         res = self.client.get(url)
         self.assertEqual(res.headers.get("X-Cache-Hit"), "1")
@@ -900,7 +838,7 @@ class EventApiTestCase(EssentialApiBase):
         res = self.client.get(f"{url}/{key}")
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertIsNone(res.headers.get("X-Cache-Hit"))
-        self.assertNotEqual(res.data["competitors"][0]["encoded_data"], "")
+        self.assertNotEqual(res.data["competitors"][0]["locations_encoded"], "")
         self.assertEqual(res.data["partial"], True)
         res = self.client.get(f"{url}/{key}")
         self.assertEqual(res.headers.get("X-Cache-Hit"), "1")
