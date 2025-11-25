@@ -2,6 +2,6 @@
 {% load hosts %}
 
 {% block content %}
-<h1>{{ event.name }} with {{user.username}}</h1>
+<h1>{{ event.name }} with {{ user.username }}</h1>
 <div>{{ effort.distance }}meters for {{ effort.duration }}seconds</div>
-{% endblock %}
+{% endblock content %}

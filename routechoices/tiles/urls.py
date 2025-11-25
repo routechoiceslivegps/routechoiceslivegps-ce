@@ -1,4 +1,5 @@
 from django.urls import re_path
+
 from routechoices.tiles import views
 
 urlpatterns = [

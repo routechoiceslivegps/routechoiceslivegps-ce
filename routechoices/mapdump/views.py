@@ -1,5 +1,7 @@
 from django.shortcuts import get_object_or_404, render
+
 from routechoices.core.models import Club, Competitor
+
 
 def home_view(request):
     user = request.user
@@ -10,7 +12,7 @@ def home_view(request):
         {
             "user": user,
             "page": page,
-        }
+        },
     )
 
 
@@ -20,9 +22,7 @@ def user_view(request, username):
         creator__username__iexact=username,
         is_personal_page=True,
     )
-    efforts = Competitor.objects.filter(
-        event__club=page
-    )
+    efforts = Competitor.objects.filter(event__club=page)
     return render(
         request,
         "mapdump/user.html",
@@ -30,13 +30,15 @@ def user_view(request, username):
             "user": page.creator,
             "page": page,
             "efforts": efforts,
-        }
+        },
     )
 
 
 def effort_view(request, aid):
     effort = get_object_or_404(
-        Competitor.objects.select_related("device", "event", "event__club", "event__club__creator"),
+        Competitor.objects.select_related(
+            "device", "event", "event__club", "event__club__creator"
+        ),
         event__club__is_personal_page=True,
         aid=aid,
     )
@@ -51,5 +53,5 @@ def effort_view(request, aid):
             "user": user,
             "effort": effort,
             "event": event,
-        }
+        },
     )

@@ -3,6 +3,6 @@
 {% block content %}
 <h1>{{ user }}'s Page</h1>
 {% for effort in efforts %}
-<div><a href="/map/{{effort.aid}}">{{ effort.event.name }}</a></div>
+<div><a href="/map/{{ effort.aid }}">{{ effort.event.name }}</a></div>
 {% endfor %}
-{% endblock %}
+{% endblock content %}

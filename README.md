@@ -23,6 +23,6 @@ This project heavily rely on the following projects:
   - Tornado Web Server
 
 
-Hosted at https://www.routechoices.com 
+Hosted at https://www.routechoices.com
 
 Status Page: https://status.routechoices.com
