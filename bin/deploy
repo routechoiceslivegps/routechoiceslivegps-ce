@@ -24,7 +24,7 @@ echo -e "\e[96mUpdating env variables\e[0m"
 doppler secrets download --no-file --format=env 1> ".env"
 echo "Done"
 echo -e "\e[96mFetching new code\e[0m"
-git fetch
+git fetch origin main
 git reset --hard ${1:-origin/master}
 echo -e "\e[96mCollecting static files\e[0m"
 ./manage.py collectstatic --noinput

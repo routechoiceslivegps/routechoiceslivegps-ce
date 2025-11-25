@@ -199,18 +199,6 @@ function addCompetitor(name, shortName, startTime, deviceId, color, tags) {
 	}
 }
 
-function displayRoutechoicesListedOption(value, first) {
-	if (value === "public") {
-		u("#id_on_events_page").closest("div:has(.form-check)").show();
-		if (!first && window.local.clubUpgraded) {
-			u("#id_on_events_page").first().checked = true;
-		}
-	} else {
-		u("#id_on_events_page").closest("div:has(.form-check)").hide();
-		u("#id_on_events_page").first().checked = false;
-	}
-}
-
 function onIofXMLLoaded(e) {
 	const file = e.target.files[0];
 	if (file) {
@@ -675,10 +663,6 @@ function showLocalTime(el) {
 		});
 
 	u("#id_backdrop_map").parent().before("<hr/><h3>Maps</h3>");
-	u("#id_privacy").on("change", (e) => {
-		displayRoutechoicesListedOption(e.target.value, false);
-	});
-	displayRoutechoicesListedOption(u("#id_privacy").val(), true);
 
 	const currentGeoJson = u("#id_geojson_layer")
 		.parent()

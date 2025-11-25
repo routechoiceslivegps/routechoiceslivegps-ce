@@ -27,7 +27,7 @@
           title="{% if club %}{{ club.name }} {% else %}{% endif %}GPS Tracking Event Feed"
           href="{% if club %}{{ club.nice_url }}feed{% else %}{% host_url 'site:public_events_feed' host 'www' %}{% endif %}" />
     <meta property="og:title"
-          content="Events{% if club %} by {{ club.name }} | Powered by {% else %} | {% endif %}Featured Events | Routechoices — Live GPS Tracking" />
+          content="Events{% if club %} by {{ club.name }} | Powered by {% else %} | {% endif %}Routechoices — Live GPS Tracking" />
     <meta property="og:description"
           content="{% if event_set_page %}{{ event_set.name }}{% else %}List of the events{% endif %}{% if club %} by {{ club.name }}{% else %} on Routechoices, an easy-to-use, yet powerful, live GPS tracking solution designed for orienteering and outdoor sports enthusiasts.{% endif %}" />
     <meta property="og:type" content="website" />
@@ -78,7 +78,7 @@
                     style="background-image:linear-gradient(0, var(--rc-gradient-filter), var(--rc-gradient-filter)), linear-gradient(120deg, #db62c9cc 0%, #e3be91cc 100%)">
                     <div class="container content" style="min-height: 100px">
                         <div class="row text-center font-weight-bold">
-                            <h1 style="font-family: Atkinson Hyperlegible, sans-serif;font-weight: 700">Public Events</h1>
+                            <h1 style="font-family: Atkinson Hyperlegible, sans-serif;font-weight: 700">Events</h1>
                         </div>
                     </div>
                 </div>
@@ -479,9 +479,7 @@
                 background-position: center">
         <div class="card-body">
             <h2 style="color: #888">
-                No
-                {% if not event_set_page or event_set.hide_secret_events %}public{% endif %}
-                events...
+                Not yet published anything...
             </h2>
         </div>
     </div>

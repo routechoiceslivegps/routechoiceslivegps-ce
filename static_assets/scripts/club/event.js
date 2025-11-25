@@ -1037,11 +1037,7 @@ function RCEvent(infoURL, clockURL, locale) {
 						// event is archived
 						eventStateControl.setReplay();
 						u("#replay_button").parent().addClass("d-none");
-						u("#live_button")
-							.off("click", onSwitchToLive)
-							.text(banana.i18n("archived-event"))
-							.removeClass("btn-secondary")
-							.addClass("btn-info", "disabled");
+						u("#live_button").hide();
 					}
 
 					shortcutURL = response.event.shortcut;
