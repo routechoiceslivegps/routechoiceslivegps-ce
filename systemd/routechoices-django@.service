@@ -5,10 +5,10 @@ After=network-online.target
 
 [Service]
 Type=Simple
-ExecStart=/apps/routechoices-server/env/bin/gunicorn -c /apps/routechoices-server/bin/gunicorn.conf.py -b 127.0.0.1:852%i
+ExecStart=/apps/routechoices-ce/env/bin/gunicorn -c /apps/routechoices-ce/bin/gunicorn.conf.py -b 127.0.0.1:852%i
 Restart=always
-Environment="PATH=/apps/routechoices-server/env/bin/"
-WorkingDirectory=/apps/routechoices-server/
+Environment="PATH=/apps/routechoices-ce/env/bin/"
+WorkingDirectory=/apps/routechoices-ce/
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=mixed
 TimeoutSec=5
