@@ -27,7 +27,7 @@ echo -e "\e[96mFetching new code\e[0m"
 git fetch
 git reset --hard ${1:-origin/master}
 echo -e "\e[96mCollecting static files\e[0m"
-uv python manage.py collectstatic --noinput
+uv run manage.py collectstatic --noinput
 echo -e "\e[96mCompressing assets\e[0m"
 uv run manage.py compress
 uv run manage.py migrate --noinput
