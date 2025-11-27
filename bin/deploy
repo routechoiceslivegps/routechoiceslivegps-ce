@@ -29,8 +29,8 @@ git reset --hard ${1:-origin/master}
 echo -e "\e[96mCollecting static files\e[0m"
 uv python manage.py collectstatic --noinput
 echo -e "\e[96mCompressing assets\e[0m"
-uv python manage.py compress
-uv pyyhon manage.py migrate --noinput
+uv run manage.py compress
+uv run manage.py migrate --noinput
 echo -e "\e[96mRestart services\e[0m"
 ./bin/restart-all
 echo "Done"
