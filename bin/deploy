@@ -7,9 +7,9 @@ PID_FILE=${BASEDIR}/var/tasks.pid
 cd $BASEDIR
 echo -e "\e[96mComparing requirements\e[0m"
 PREV_MD5SUM="$(md5sum requirements.txt)"
-curl -s -O -L https://raw.github.com/routechoiceslivegps/routechoiceslivegps-ce/${1:-master}/requirements.txt
-NEW_MD5SUM="$(md5sum requirements.txt)"
-if [ "$PREV_MD5SUM" != "$NEW_MD5SUM" ]
+curl -s -O -L https://raw.github.com/routechoiceslivegps/routechoiceslivegps-ce/${1:-main}
+MD5SUM="$(md5sum requirements.txt)"
+if [ "$MD5SUM" != "$NEW_MD5SUM" ]
 then
   echo "Installing new requirements"
   source $BASEDIR/env/bin/activate
@@ -25,7 +25,7 @@ doppler secrets download --no-file --format=env 1> ".env"
 echo "Done"
 echo -e "\e[96mFetching new code\e[0m"
 git fetch
-git reset --hard ${1:-origin/master}
+git reset --hard ${1:-origin/main}
 echo -e "\e[96mCollecting static files\e[0m"
 uv run manage.py collectstatic --noinput
 echo -e "\e[96mCompressing assets\e[0m"
