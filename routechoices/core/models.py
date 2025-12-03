@@ -518,6 +518,7 @@ class Map(models.Model):
         "eg: 60.519,22.078,60.518,22.115,60.491,22.112,60.492,22.073",
         validators=[validate_corners_coordinates],
     )
+    """
     _corners_coordinates = models.GeneratedField(
         expression=Cast(
             StringToArray(F("corners_coordinates"), Value(",")),
@@ -526,6 +527,7 @@ class Map(models.Model):
         output_field=ArrayField(models.FloatField(), size=8),
         db_persist=True,
     )
+    """
 
     class Meta:
         ordering = ["-creation_date"]
@@ -613,10 +615,7 @@ class Map(models.Model):
 
     @cached_property
     def corners_coordinates_array(self):
-        if not self._is_pk_set():
-            return [float(x) for x in self.corners_coordinates.split(",")]
-        else:
-            return self._corners_coordinates
+        return [float(x) for x in self.corners_coordinates.split(",")]
 
     @property
     def corners_coordinates_string(self):
@@ -742,9 +741,7 @@ class Map(models.Model):
 
     @cached_property
     def country_name(self):
-        if cc := self.country_code:
-            return COUNTRIES.get(cc, "")
-        return "Unknown"
+        return ""
 
     @cached_property
     def country_flag(self):
@@ -2096,9 +2093,7 @@ class Event(models.Model):
 
     @cached_property
     def country_name(self):
-        if cc := self.country_code:
-            return COUNTRIES.get(cc, "")
-        return "Unknown"
+        return ""
 
     @cached_property
     def country_flag(self):

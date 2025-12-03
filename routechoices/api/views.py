@@ -1045,7 +1045,7 @@ def competitor_route_upload(request, competitor_id):
     try:
         lats = [float(x) for x in request.data.get("latitudes", "").split(",") if x]
         lons = [float(x) for x in request.data.get("longitudes", "").split(",") if x]
-        times = [float(x) for x in request.data.get("timestamps", "").split(",") if x]
+        times = [int(float(x)) for x in request.data.get("timestamps", "").split(",") if x]
     except ValueError:
         raise ValidationError("Invalid data format")
 
@@ -1452,7 +1452,7 @@ def locations_api_gw(request):
     device_id = str(device_id)
     if re.match(r"^[0-9]+$", device_id):
         if secret_provided not in settings.POST_LOCATION_SECRETS and (
-            not request.user.is_authenticated or request.user.username != "apps"
+            not request.user.is_authenticated or not request.user.is_superuser
         ):
             raise PermissionDenied(
                 "Authentication Failed. Only validated apps are allowed"
@@ -1597,7 +1597,7 @@ def create_device_id(request):
         return Response(
             {"status": "ok", "device_id": device.aid, "imei": imei}, status=status_code
         )
-    if not request.user.is_authenticated or request.user.username != "apps":
+    if not request.user.is_authenticated or not request.user.is_superuser:
         raise PermissionDenied(
             "Authentication Failed, Only validated apps can create new device IDs"
         )

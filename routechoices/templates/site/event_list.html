@@ -181,7 +181,7 @@
                                         <div class="px-2 py-1 bd-highlight">
                                             <div>
                                                 <a class="link-primary-alt stretched-link text-decoration-none"
-                                                   href="{{ event.get_absolute_url }}"><b style="font-size: 1.5em;"><span class="flags-polyfill" title="{{ event.country_name }}">{{ event.country_flag }}</span> {{ event.name }}</b></a> <span class="mx-2 py-1 px-1 badge bg-danger"
+                                                   href="{{ event.get_absolute_url }}"><b style="font-size: 1.5em;">{{ event.name }}</b></a> <span class="mx-2 py-1 px-1 badge bg-danger"
        style="font-size: 0.9em;
               vertical-align: top"><b>LIVE</b></span>
                                             </div>
@@ -282,7 +282,7 @@
                                         <div>
                                             <a class="link-primary-alt stretched-link text-decoration-none"
                                                href="{{ event.get_absolute_url }}">
-                                                <b style="font-size: 1.5em;"><span class="flags-polyfill" title="{{ event.country_name }}">{{ event.country_flag }}</span> {{ event.name }}</b>
+                                                <b style="font-size: 1.5em;">{{ event.name }}</b>
                                             </a>
                                         </div>
                                         <div>
@@ -436,7 +436,7 @@
                             <div class="px-2 py-1 bd-highlight">
                                 <div>
                                     <a class="link-primary-alt stretched-link text-decoration-none"
-                                       href="{{ event.get_absolute_url }}"><b style="font-size: 1.5em;"><span class="flags-polyfill" title="{{ event.country_name }}">{{ event.country_flag }}</span> {{ event.name }}</b></a>
+                                       href="{{ event.get_absolute_url }}"><b style="font-size: 1.5em;">{{ event.name }}</b></a>
                                 </div>
                                 <div>
                                     <span class="date-utc" data-date="{{ event.start_date|date:'c' }}">{{ event.start_date|date:'Y-m-d H:i' }}</span>
