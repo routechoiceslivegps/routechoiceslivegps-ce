@@ -1,6 +1,6 @@
-from django.urls import re_path, path
-from routechoices.mapdump import views
+from django.urls import path, re_path
 
+from routechoices.mapdump import views
 
 urlpatterns = [
     path("", views.home_view, name="home_view"),
