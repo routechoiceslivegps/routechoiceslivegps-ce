@@ -3,10 +3,7 @@ import time
 import magic
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.sitemaps.views import (
-    _get_latest_lastmod,
-    x_robots_tag,
-)
+from django.contrib.sitemaps.views import _get_latest_lastmod, x_robots_tag
 from django.core.paginator import EmptyPage, PageNotAnInteger
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -20,17 +17,11 @@ from rest_framework import status
 from routechoices.club import feeds
 from routechoices.core.models import PRIVACY_PRIVATE, Club, Event, EventSet
 from routechoices.lib import cache
-from routechoices.lib.duration_constants import (
-    DURATION_ONE_DAY,
-)
-from routechoices.lib.helpers import (
-    get_best_image_mime,
-    get_current_site,
-    get_image_mime_from_request,
-    gpsseuranta_encode_data,
-    int_base32,
-    safe64encodedsha,
-)
+from routechoices.lib.duration_constants import DURATION_ONE_DAY
+from routechoices.lib.helpers import (get_best_image_mime, get_current_site,
+                                      get_image_mime_from_request,
+                                      gpsseuranta_encode_data, int_base32,
+                                      safe64encodedsha)
 from routechoices.lib.other_gps_services.gpsseuranta import GpsSeurantaNet
 from routechoices.lib.other_gps_services.livelox import Livelox
 from routechoices.lib.other_gps_services.loggator import Loggator
@@ -727,9 +718,9 @@ LIVE:{1 if event.is_live else 0}
 """
     if event.map:
         width, height = event.map.quick_size
-        tl = event.map.map_xy_to_wsg84(0, 0)
-        tr = event.map.map_xy_to_wsg84(width, 0)
-        br = event.map.map_xy_to_wsg84(width, height)
+        tl = event.map.map_xy_to_wsg84((0, 0))
+        tr = event.map.map_xy_to_wsg84((width, 0))
+        br = event.map.map_xy_to_wsg84((width, height))
         out += f"CALIBRATION:{tl['lon']:.5f}|{tl['lat']:.5f}|0|0|{tr['lon']:.5f}|{tr['lat']:.5f}|{width}|0|{br['lon']:.5f}|{br['lat']:.5f}|{width}|{height}\n"
 
     for comp in event.competitors.all():

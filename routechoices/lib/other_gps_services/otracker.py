@@ -7,14 +7,12 @@ from curl_cffi import requests
 from django.core.files.base import ContentFile
 from PIL import Image
 
-from routechoices.core.models import PRIVACY_SECRET, Competitor, Device, Event, Map
-from routechoices.lib.helpers import safe64encodedsha
+from routechoices.core.models import (PRIVACY_SECRET, Competitor, Device,
+                                      Event, Map)
+from routechoices.lib.helpers import Wgs84Coordinate, safe64encodedsha
 from routechoices.lib.other_gps_services.commons import (
-    CompetitorsImportError,
-    EventImportError,
-    MapsImportError,
-    ThirdPartyTrackingSolution,
-)
+    CompetitorsImportError, EventImportError, MapsImportError,
+    ThirdPartyTrackingSolution)
 
 
 class OTracker(ThirdPartyTrackingSolution):
@@ -67,19 +65,17 @@ class OTracker(ThirdPartyTrackingSolution):
         try:
             map_file = ContentFile(r.content)
             map_opt = map_data["options"]
-            corners_coords = []
+            bound = []
             for corner in ("tl", "tr", "br", "bl"):
-                corners_coords += [
-                    map_opt[corner]["lat"],
-                    map_opt[corner]["lon"],
-                ]
-            calib_string = ",".join(str(x) for x in corners_coords)
+                bound.append(
+                    Wgs84Coordinate((map_opt[corner]["lat"], map_opt[corner]["lon"]))
+                )
             map_obj.image.save("imported_image", map_file, save=False)
             im = Image.open(map_file)
             width, height = im.size
             map_obj.width = width
             map_obj.height = height
-            map_obj.corners_coordinates = calib_string
+            map_obj.bound = bound
             map_obj.save()
         except Exception:
             map_obj.delete()

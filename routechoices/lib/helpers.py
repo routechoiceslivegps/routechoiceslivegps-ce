@@ -13,19 +13,66 @@ import zoneinfo
 from datetime import datetime
 from math import cos, pi, sin, sqrt
 
+import reverse_geocode
 from curl_cffi import requests
 from django.conf import settings
 from django.http.response import Http404
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import is_naive, make_aware
 from PIL import Image, ImageFile
+from timezonefinder import TimezoneFinder
 from user_sessions.templatetags.user_sessions import device as device_name
 
-from routechoices.lib.globalmaptiles import GlobalMercator
 from routechoices.lib.random_strings import generate_random_string
 from routechoices.lib.validators import validate_nice_slug
 
 UTC_TZ = zoneinfo.ZoneInfo("UTC")
+
+COUNTRIES = reverse_geocode.GeocodeData()._countries
+TIMEZONEFINDER = TimezoneFinder(in_memory=True)
+ORIGIN_SHIFT = 2 * math.pi * 6378137 / 2.0  # 20037508.342789244
+
+
+class Point:
+    x = None
+    y = None
+
+    def __init__(self, val, *args):
+        if len(args) == 1:
+            x, y = [val, args[0]]
+        elif isinstance(val, Point):
+            x, y = val.xy
+        elif isinstance(val, tuple) or isinstance(val, list):
+            x, y = val
+        elif isinstance(val, dict):
+            x = val.get("x")
+            y = val.get("y")
+        else:
+            raise ValueError()
+        self.x = x
+        self.y = y
+
+    @property
+    def xy(self):
+        return (self.x, self.y)
+
+    def round(self, precision):
+        return Point(
+            round(self.x, precision),
+            round(self.y, precision),
+        )
+
+    def __repr__(self):
+        return f"x: {self.x}, y:{self.y}"
+
+
+def country_code_at_coords(wgs84_coordinate):
+    return reverse_geocode.get(wgs84_coordinate.latlon).get("country_code")
+
+
+def timezone_at_coords(wgs84_coordinate):
+    lat, lon = wgs84_coordinate.latlon
+    return TIMEZONEFINDER.timezone_at(lng=lat, lat=lon)
 
 
 def simplify_periods(ps):
@@ -47,7 +94,7 @@ def simplify_periods(ps):
 def get_remote_image_sizes(uri):
     # Get file size *and* image size (None if not known)
     if not re.match("^https?://", uri.lower()):
-        raise Exception("Invalid Protocol")
+        raise ValueError("Invalid Protocol")
     with urllib.request.urlopen(uri) as file:
         size = file.headers.get("content-length")
         if size:
@@ -208,108 +255,94 @@ def short_random_slug():
     return generate_random_string(alphabet, 6)
 
 
-def solve_affine_matrix(r1, s1, t1, r2, s2, t2, r3, s3, t3):
-    a = (((t2 - t3) * (s1 - s2)) - ((t1 - t2) * (s2 - s3))) / (
-        ((r2 - r3) * (s1 - s2)) - ((r1 - r2) * (s2 - s3))
+def solve_affine_matrix(matrix):
+    a, b, c, d, e, f, g, h, i = matrix
+    x = (((f - i) * (b - e)) - ((c - f) * (e - h))) / (
+        ((d - g) * (b - e)) - ((a - d) * (e - h))
     )
-    b = (((t2 - t3) * (r1 - r2)) - ((t1 - t2) * (r2 - r3))) / (
-        ((s2 - s3) * (r1 - r2)) - ((s1 - s2) * (r2 - r3))
+    y = (((f - i) * (a - d)) - ((c - f) * (d - g))) / (
+        ((e - h) * (a - d)) - ((b - e) * (d - g))
     )
-    c = t1 - (r1 * a) - (s1 * b)
-    return [a, b, c]
+    z = c - (a * x) - (b * y)
+    return [x, y, z]
 
 
-def derive_affine_transform(a1, b1, c1, a0, b0, c0):
-    e = 1e-15
-    a0["x"] -= e
-    a0["y"] += e
-    b0["x"] += e
-    b0["y"] -= e
-    a1["x"] += e
-    a1["y"] += e
-    b1["x"] -= e
-    b1["y"] -= e
-    x = solve_affine_matrix(
-        a0["x"], a0["y"], a1["x"], b0["x"], b0["y"], b1["x"], c0["x"], c0["y"], c1["x"]
-    )
-    y = solve_affine_matrix(
-        a0["x"], a0["y"], a1["y"], b0["x"], b0["y"], b1["y"], c0["x"], c0["y"], c1["y"]
-    )
-    return tuple(x + y)
+def flatten(something):
+    if isinstance(something, (list, tuple, set, range)):
+        for sub in something:
+            yield from flatten(sub)
+    else:
+        yield something
 
 
-def three_point_calibration_to_corners(calibration_string, width, height):
-    cal_pts_raw = calibration_string.split("|")
-    cal_pts = [
-        {
-            "lon": float(cal_pts_raw[0]),
-            "lat": float(cal_pts_raw[1]),
-            "x": float(cal_pts_raw[2]),
-            "y": float(cal_pts_raw[3]),
-        },
-        {
-            "lon": float(cal_pts_raw[4]),
-            "lat": float(cal_pts_raw[5]),
-            "x": float(cal_pts_raw[6]),
-            "y": float(cal_pts_raw[7]),
-        },
-        {
-            "lon": float(cal_pts_raw[8]),
-            "lat": float(cal_pts_raw[9]),
-            "x": float(cal_pts_raw[10]),
-            "y": float(cal_pts_raw[11]),
-        },
-    ]
-    proj = GlobalMercator()
-    cal_pts_meter = [
-        proj.latlon_to_meters(cal_pts[0]),
-        proj.latlon_to_meters(cal_pts[1]),
-        proj.latlon_to_meters(cal_pts[2]),
-    ]
-    xy_to_coords_coeffs = derive_affine_transform(*cal_pts_meter, *cal_pts)
-
-    def map_xy_to_latlon(xy):
-        x = (
-            xy["x"] * xy_to_coords_coeffs[0]
-            + xy["y"] * xy_to_coords_coeffs[1]
-            + xy_to_coords_coeffs[2]
+def derive_affine_transform(ref_a_points, ref_b_points):
+    matrix_x = list(
+        flatten(
+            list(
+                (
+                    ref_b_points[i].x,
+                    ref_b_points[i].y,
+                    ref_a_points[i].x,
+                )
+                for i in range(3)
+            )
         )
-        y = (
-            xy["x"] * xy_to_coords_coeffs[3]
-            + xy["y"] * xy_to_coords_coeffs[4]
-            + xy_to_coords_coeffs[5]
+    )
+    matrix_y = list(
+        flatten(
+            list(
+                (
+                    ref_b_points[i].x,
+                    ref_b_points[i].y,
+                    ref_a_points[i].y,
+                )
+                for i in range(3)
+            )
         )
-        return proj.meters_to_latlon({"x": x, "y": y})
+    )
+    x_coefs = solve_affine_matrix(matrix_x)
+    y_coefs = solve_affine_matrix(matrix_y)
 
-    corners = [
-        map_xy_to_latlon({"x": 0, "y": 0}),
-        map_xy_to_latlon({"x": width, "y": 0}),
-        map_xy_to_latlon({"x": width, "y": height}),
-        map_xy_to_latlon({"x": 0, "y": height}),
-    ]
+    def transform(xy):
+        x, y = Point(xy).xy
+        xt = x * x_coefs[0] + y * x_coefs[1] + x_coefs[2]
+        yt = x * y_coefs[0] + y * y_coefs[1] + y_coefs[2]
+        return xt, yt
+
+    return transform
+
+
+def wgs84_bound_from_3_ref_points(coords, image_points, image_size):
+    coords_xy_meters = list((val.xy_meters for val in coords))
+    image_xy_to_meters = derive_affine_transform(coords_xy_meters, image_points)
+
+    def image_xy_to_wgs84(xy):
+        pt = Point(xy)
+        xym = image_xy_to_meters(pt)
+        latlon = XYMeters(xym).wgs84_coordinate
+        return latlon
+
+    width, height = image_size
+    return (
+        image_xy_to_wgs84((0, 0)),
+        image_xy_to_wgs84((width, 0)),
+        image_xy_to_wgs84((width, height)),
+        image_xy_to_wgs84((0, height)),
+    )
+
+
+def adjugate_matrix(matrix):
+    a, b, c, d, e, f, g, h, i = matrix
     return [
-        round(corners[0]["lat"], 5),
-        round(corners[0]["lon"], 5),
-        round(corners[1]["lat"], 5),
-        round(corners[1]["lon"], 5),
-        round(corners[2]["lat"], 5),
-        round(corners[2]["lon"], 5),
-        round(corners[3]["lat"], 5),
-        round(corners[3]["lon"], 5),
-    ]
-
-
-def adjugate_matrix(m):
-    return [
-        m[4] * m[8] - m[5] * m[7],
-        m[2] * m[7] - m[1] * m[8],
-        m[1] * m[5] - m[2] * m[4],
-        m[5] * m[6] - m[3] * m[8],
-        m[0] * m[8] - m[2] * m[6],
-        m[2] * m[3] - m[0] * m[5],
-        m[3] * m[7] - m[4] * m[6],
-        m[1] * m[6] - m[0] * m[7],
-        m[0] * m[4] - m[1] * m[3],
+        e * i - f * h,
+        c * h - b * i,
+        b * f - c * e,
+        f * g - d * i,
+        a * i - c * g,
+        c * d - a * f,
+        d * h - e * g,
+        b * g - a * h,
+        a * e - b * d,
     ]
 
 
@@ -322,57 +355,66 @@ def multiply_matrices(a, b):
     return c
 
 
-def multiply_matrix_vector(m, v):
+def multiply_matrix_vector(matrix, vector):
+    a, b, c, d, e, f, g, h, i = matrix
+    x, y, z = vector
     return [
-        m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
-        m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
-        m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
+        a * x + b * y + c * z,
+        d * x + e * y + f * z,
+        g * x + h * y + i * z,
     ]
 
 
 def basis_to_points(a, b, c, d):
-    m = [a.x, b.x, c.x, a.y, b.y, c.y, 1, 1, 1]
-    v = multiply_matrix_vector(adjugate_matrix(m), [d.x, d.y, 1])
-    return multiply_matrices(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]])
+    matrix = [a.x, b.x, c.x, a.y, b.y, c.y, 1, 1, 1]
+    x, y, z = multiply_matrix_vector(adjugate_matrix(matrix), [d.x, d.y, 1])
+    return multiply_matrices(matrix, [x, 0, 0, 0, y, 0, 0, 0, z])
 
 
-def general_2d_projection(a1, a2, a3, a4, b1, b2, b3, b4):
-    s = basis_to_points(a1, a2, a3, a4)
-    d = basis_to_points(b1, b2, b3, b4)
+def general_2d_projection(from_bound, to_bound):
+    s = basis_to_points(*from_bound)
+    d = basis_to_points(*to_bound)
     return multiply_matrices(d, adjugate_matrix(s))
 
 
-def project(m, x, y):
-    v = multiply_matrix_vector(m, [x, y, 1])
-    if v[2] == 0:
-        v[2] = 0.000000001
-    return v[0] / v[2], v[1] / v[2]
+def project(matrix, xy_coordinate):
+    x, y = xy_coordinate.xy
+    a, b, c = multiply_matrix_vector(matrix, [x, y, 1])
+    if c == 0:
+        c = 0.000000001
+    return Point(a / c, b / c)
 
 
-def compute_corners_from_kml_latlonbox(n, e, s, w, rot):
+def wgs84_bound_from_latlon_box(n, e, s, w, rot):
     a = (e + w) / 2
     b = (n + s) / 2
     squish = cos(deg2rad(b))
     x = squish * (e - w) / 2
     y = (n - s) / 2
 
-    ne = (
+    ne = Wgs84Coordinate(
         b + x * sin(deg2rad(rot)) + y * cos(deg2rad(rot)),
         a + (x * cos(deg2rad(rot)) - y * sin(deg2rad(rot))) / squish,
     )
-    nw = (
+    nw = Wgs84Coordinate(
         b - x * sin(deg2rad(rot)) + y * cos(deg2rad(rot)),
         a - (x * cos(deg2rad(rot)) + y * sin(deg2rad(rot))) / squish,
     )
-    sw = (
+    sw = Wgs84Coordinate(
         b - x * sin(deg2rad(rot)) - y * cos(deg2rad(rot)),
         a - (x * cos(deg2rad(rot)) - y * sin(deg2rad(rot))) / squish,
     )
-    se = (
+    se = Wgs84Coordinate(
         b + x * sin(deg2rad(rot)) - y * cos(deg2rad(rot)),
         a + (x * cos(deg2rad(rot)) + y * sin(deg2rad(rot))) / squish,
     )
     return nw, ne, se, sw
+
+
+def calibration_string_from_wgs84_bound(bound):
+    return ",".join(
+        (f"{corner.latitude:.5f},{corner.longitude:.5f}" for corner in bound)
+    )
 
 
 def initial_of_name(name):
@@ -472,20 +514,23 @@ def distance_xy(ax, ay, bx, by):
     return math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
 
 
-def distance_latlon(a, b):
+def distance_between_locations(a, b):
     R = 6371009  # https://en.wikipedia.org/wiki/Great-circle_distance
-    lat1 = math.radians(a["lat"])
-    lon1 = math.radians(a["lon"])
-    lat2 = math.radians(b["lat"])
-    lon2 = math.radians(b["lon"])
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = (
+
+    a_lat = math.radians(a.latitude)
+    a_lon = math.radians(a.longitude)
+
+    b_lat = math.radians(b.latitude)
+    b_lon = math.radians(b.longitude)
+
+    dlon = b_lon - a_lon
+    dlat = b_lat - a_lat
+
+    angle = (
         math.sin(dlat / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+        + math.cos(a_lat) * math.cos(b_lat) * math.sin(dlon / 2) ** 2
     )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
+    return R * 2 * math.atan2(math.sqrt(angle), math.sqrt(1 - angle))
 
 
 def simplify_line(points, tolerance=11):
@@ -537,3 +582,92 @@ def gpsseuranta_encode_data(competitor_id, locations):
             prev_pt = [t, lat, lng]
         out += "\n"
     return out
+
+
+class XYMeters(Point):
+    @property
+    def wgs84_coordinate(self):
+        mx, my = self.xy
+        lon = (mx / ORIGIN_SHIFT) * 180.0
+        lat = (
+            180
+            / math.pi
+            * (
+                2 * math.atan(math.exp((my / ORIGIN_SHIFT) * 180.0 * math.pi / 180.0))
+                - math.pi / 2.0
+            )
+        )
+        return Wgs84Coordinate(lat, lon)
+
+    @property
+    def latitude(self):
+        return self.wgs84_coordinate.latitude
+
+    @property
+    def longitude(self):
+        return self.wgs84_coordinate.longitude
+
+    def __repr__(self):
+        return f"mx: {self.x}, my:{self.y}"
+
+
+class Wgs84Coordinate:
+    latitude = None
+    longitude = None
+
+    def __init__(self, val, *args):
+        if len(args) == 1:
+            lat, lon = val, args[0]
+        elif isinstance(val, Wgs84Coordinate):
+            lat, lon = val.latlon
+        elif isinstance(val, XYMeters):
+            lat, lon = val.wgs84_coordinate
+        elif isinstance(val, tuple) or isinstance(val, list):
+            lat, lon = val
+        elif isinstance(val, dict):
+            lat, lon = (val.get("x"), val.get("y"))
+        else:
+            raise ValueError()
+
+        self.latitude = lat
+        self.longitude = lon
+
+    @property
+    def latlon(self):
+        return self.latitude, self.longitude
+
+    @property
+    def xy_meters(self):
+        lat, lon = self.latlon
+        mx = lon * ORIGIN_SHIFT / 180.0
+        my = (
+            math.log(math.tan((90 + lat) * math.pi / 360.0))
+            / (math.pi / 180.0)
+            * ORIGIN_SHIFT
+            / 180.0
+        )
+        return XYMeters(mx, my)
+
+    def __repr__(self):
+        return f"{self.latitude}, {self.longitude}"
+
+
+def wgs84_to_meters(val):
+    """
+    Converts given lat/lon in WGS84 Datum to XY in Spherical Mercator
+    EPSG:900913
+    """
+    return Wgs84Coordinate(val).xy_meters
+
+
+def meters_to_wgs84(val):
+    """
+    Converts X/Y point from Spherical Mercator EPSG:900913 to lat/lon
+    in WGS84 Datum
+    """
+    return XYMeters(val).wgs84_coordinate
+
+
+def triangle_area(side_length):
+    a, b, c = side_length
+    return (((a + b + c) * (-a + b + c) * (a - b + c) * (a + b - c)) ** 0.5) / 4

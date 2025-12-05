@@ -2,12 +2,8 @@ import re
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.validators import (
-    DomainNameValidator,
-    RegexValidator,
-    ValidationError,
-    validate_email,
-)
+from django.core.validators import (DomainNameValidator, RegexValidator,
+                                    ValidationError, validate_email)
 from django.utils.translation import gettext_lazy as _
 
 import routechoices.lib.luhn as luhn
@@ -113,7 +109,7 @@ def validate_domain_slug(slug):
         raise ValidationError(errors)
 
 
-def validate_corners_coordinates(val):
+def validate_calibration_string(val):
     cal_values = val.split(",")
     if len(cal_values) != 8:
         raise ValidationError(

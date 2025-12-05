@@ -16,14 +16,8 @@ from django_hosts.resolvers import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
-from routechoices.core.models import (
-    PRIVACY_PRIVATE,
-    Club,
-    Competitor,
-    Device,
-    Event,
-    Map,
-)
+from routechoices.core.models import (PRIVACY_PRIVATE, Club, Competitor,
+                                      Device, Event, Map)
 from routechoices.lib.helpers import epoch_to_datetime
 
 
@@ -93,7 +87,10 @@ class EssentialApiTestCase1(EssentialApiBase):
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
         validated_apps_user = User.objects.create_user(
-            "apps", f"apps{random.randrange(1000)}@example.com", "pa$$word123"
+            "trusted-app",
+            f"apps{random.randrange(1000)}@example.com",
+            "pa$$word123",
+            is_superuser=True,
         )
         self.client.force_login(validated_apps_user)
         res = self.client.post(url)
@@ -816,7 +813,7 @@ class EventApiTestCase(EssentialApiBase):
         raster_map = Map.objects.create(
             club=club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string_raw=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),
@@ -1092,7 +1089,10 @@ class LocationApiTestCase(EssentialApiBase):
 
     def test_locations_api_gw_no_secret_but_logged_in_as_apps(self):
         validated_apps_user = User.objects.create_user(
-            "apps", f"apps{random.randrange(1000)}@example.com", "pa$$word123"
+            "apps",
+            f"apps{random.randrange(1000)}@example.com",
+            "pa$$word123",
+            is_superuser=True,
         )
         self.client.force_login(validated_apps_user)
         dev_id = self.get_device_id()
@@ -1282,7 +1282,7 @@ class RouteUploadApiTestCase(EssentialApiBase):
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         errors = json.loads(res.content)
         self.assertEqual(len(errors), 1)
-        self.assertIn("Invalid time value", errors[0])
+        self.assertIn("Invalid data format", errors[0])
 
         t = time.time()
         res = self.client.post(

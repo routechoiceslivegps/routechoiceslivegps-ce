@@ -8,7 +8,8 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from routechoices.api.tests import EssentialApiBase
-from routechoices.core.models import Club, Competitor, Device, Event, EventSet, Map
+from routechoices.core.models import (Club, Competitor, Device, Event,
+                                      EventSet, Map)
 
 
 class ClubViewsTestCase(EssentialApiBase):
@@ -217,7 +218,7 @@ class ClubViewsTestCase(EssentialApiBase):
         raster_map = Map.objects.create(
             club=self.club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string_raw=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),

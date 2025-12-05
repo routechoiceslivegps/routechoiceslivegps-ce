@@ -382,7 +382,7 @@ function enableBtnToPreview() {
 	}
 
 	function loadCalibString() {
-		calibString = u("#id_corners_coordinates").val();
+		calibString = u("#id_calibration_string_raw").val();
 		if (!calibString || !isValidCalibString(calibString)) {
 			closePreview();
 		}
@@ -703,11 +703,11 @@ function enableBtnToPreview() {
 				return;
 			}
 			const bounds = extractCornersCoordsFromFilename(this.files[0].name);
-			if (bounds && !u("#id_corners_coordinates").val()) {
-				u("#id_corners_coordinates").val(bounds);
+			if (bounds && !u("#id_calibration_string_raw").val()) {
+				u("#id_calibration_string_raw").val(bounds);
 			}
 			u("#calibration_help").removeClass("d-none");
-			u("#id_corners_coordinates").trigger("change");
+			u("#id_calibration_string_raw").trigger("change");
 		} else {
 			if (!u("#main-form").hasClass("edit-form")) {
 				u("#calibration_help").addClass("d-none");
@@ -716,7 +716,7 @@ function enableBtnToPreview() {
 		}
 	});
 
-	u("#id_corners_coordinates").on("change", (e) => {
+	u("#id_calibration_string_raw").on("change", (e) => {
 		const val = e.target.value;
 		const found = isValidCalibString(val);
 		if (
@@ -775,7 +775,7 @@ function enableBtnToPreview() {
 	});
 
 	u("#validate-calibration-button").on("click", (e) => {
-		u("#id_corners_coordinates").val(calibString).trigger("change");
+		u("#id_calibration_string_raw").val(calibString).trigger("change");
 		closeCalibrationHelper();
 	});
 

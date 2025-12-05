@@ -12,15 +12,8 @@ from PIL import Image
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
-from routechoices.core.models import (
-    Club,
-    Competitor,
-    Device,
-    Event,
-    EventSet,
-    ImeiDevice,
-    Map,
-)
+from routechoices.core.models import (Club, Competitor, Device, Event,
+                                      EventSet, ImeiDevice, Map)
 
 
 class EssentialDashboardBase(APITestCase):
@@ -405,7 +398,7 @@ class TestDashboard(EssentialDashboardBase):
         raster_map = Map.objects.create(
             club=self.club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string_raw=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),
@@ -439,7 +432,7 @@ class TestDashboard(EssentialDashboardBase):
             {
                 "name": "My Test Map",
                 "image": map_image,
-                "corners_coordinates": "61.45075,24.18994,61.44656,24.24721,61.42094,24.23851,61.42533,24.18157",
+                "calibration_string_raw": "61.45075,24.18994,61.44656,24.24721,61.42094,24.23851,61.42533,24.18157",
             },
         )
         self.assertEqual(res.status_code, status.HTTP_302_FOUND)
@@ -449,7 +442,7 @@ class TestDashboard(EssentialDashboardBase):
             {
                 "name": "My Test Map",
                 "image": map_image,
-                "corners_coordinates": "61.45075,24.18994,61.44656,24.24721,61.42094,24.23851,61.42533,24.18157,123",
+                "calibration_string_raw": "61.45075,24.18994,61.44656,24.24721,61.42094,24.23851,61.42533,24.18157,123",
             },
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
@@ -460,7 +453,7 @@ class TestDashboard(EssentialDashboardBase):
             {
                 "name": "My Test Map",
                 "image": map_image,
-                "corners_coordinates": "61.45075,24.18994,61.44656,24.24721,61.42094,24.23851,61.42533,xx.18157",
+                "calibration_string_raw": "61.45075,24.18994,61.44656,24.24721,61.42094,24.23851,61.42533,xx.18157",
             },
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
@@ -765,7 +758,7 @@ class TestDashboard(EssentialDashboardBase):
         raster_map = Map.objects.create(
             club=self.club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string_raw=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),
@@ -782,7 +775,7 @@ class TestDashboard(EssentialDashboardBase):
         raster_map2 = Map.objects.create(
             club=self.club,
             name="Test map",
-            corners_coordinates=(
+            calibration_string_raw=(
                 "61.45075,24.18994,61.44656,24.24721,"
                 "61.42094,24.23851,61.42533,24.18156"
             ),

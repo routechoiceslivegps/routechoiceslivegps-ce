@@ -1,7 +1,8 @@
 from django.core.management.base import BaseCommand
 
 from routechoices.core.models import Event
-from routechoices.lib.helpers import distance_latlon
+from routechoices.lib.helpers import (Wgs84Coordinate,
+                                      distance_between_locations)
 
 
 class Command(BaseCommand):
@@ -39,9 +40,9 @@ class Command(BaseCommand):
                     break
                 if prev_point:
                     total_distance += (
-                        distance_latlon(
-                            {"lat": point[1], "lon": point[2]},
-                            {"lat": prev_point[1], "lon": prev_point[2]},
+                        distance_between_locations(
+                            Wgs84Coordinate(point[1:]),
+                            Wgs84Coordinate(prev_point[1:]),
                         )
                         / 1000
                     )

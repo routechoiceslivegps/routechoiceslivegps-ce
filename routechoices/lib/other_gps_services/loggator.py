@@ -6,9 +6,7 @@ from curl_cffi import requests
 from routechoices.core.models import Competitor, Event, Map
 from routechoices.lib.helpers import get_remote_image_sizes
 from routechoices.lib.other_gps_services.commons import (
-    EventImportError,
-    ThirdPartyTrackingSolutionWithProxy,
-)
+    EventImportError, ThirdPartyTrackingSolutionWithProxy)
 
 
 class Loggator(ThirdPartyTrackingSolutionWithProxy):
@@ -52,7 +50,7 @@ class Loggator(ThirdPartyTrackingSolutionWithProxy):
         map_obj.width = size[0]
         map_obj.height = size[1]
 
-        map_obj.corners_coordinates = ",".join(
+        map_obj.calibration_string_raw = ",".join(
             [
                 f"{map_coords[pos]['lat']:.5f},{map_coords[pos]['lng']:.5f}"
                 for pos in ("topLeft", "topRight", "bottomRight", "bottomLeft")

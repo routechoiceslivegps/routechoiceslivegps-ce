@@ -1,49 +1,35 @@
-from datetime import timedelta
-
 from django.core.management.base import BaseCommand
-from django.db.models import Prefetch
 from django.utils.timezone import now
 
-from routechoices.core.models import Competitor, Device
+from routechoices.core.models import Competitor
 
 
 class Command(BaseCommand):
-    help = (
-        "Archives a device if it contains more than 1 days worth of locations"
-        " before last start"
-    )
+    help = "Release competitors trapped in a freezed event"
 
     def add_arguments(self, parser):
         parser.add_argument("--force", action="store_true", default=False)
 
     def handle(self, *args, **options):
         force = options["force"]
-        devices = Device.objects.prefetch_related(
-            Prefetch(
-                "competitor_set",
-                queryset=Competitor.objects.select_related("event"),
-            )
-        ).filter(_location_count__gt=24 * 3600, virtual=False)
 
-        device_archived_count = 0
-        two_weeks_ago = now() - timedelta(days=14)
-        for device in devices:
-            archived_locations_count = 0
-            archive_device = device.archive(until=two_weeks_ago, save=force)
-            if archive_device:
-                archived_locations_count = archive_device.location_count
-            if archived_locations_count:
-                device_archived_count += 1
-                self.stdout.write(
-                    f"Device {device.aid}, archiving {archived_locations_count} locations"
-                )
-        if device_archived_count == 0:
-            self.stdout.write(self.style.SUCCESS("No devices to archive"))
+        chilling_competitor = Competitor.objects.filter(
+            event__freezed_at__lt=now(),
+            device__virtual=False,
+        )
+        competitor_released = 0
+        for competitor in chilling_competitor:
+            archive = competitor.archive_device(force)
+            if archive:
+                competitor_released += 1
+                self.stdout.write(f"Competitor {competitor} is trapped, releasing him")
+        if not competitor_released:
+            self.stdout.write(self.style.SUCCESS("No competitor trapped"))
         elif force:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"Successfully archived {device_archived_count} devices"
+                    f"Successfully released {competitor_released} competitors"
                 )
             )
         else:
-            self.stdout.write(f"Would archive {device_archived_count} devices")
+            self.stdout.write(f"Would released {competitor_released} competitors")

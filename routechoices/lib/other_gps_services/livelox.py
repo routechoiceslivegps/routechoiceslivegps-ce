@@ -15,15 +15,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from routechoices.core.models import Competitor, Event, Map
 from routechoices.lib import cache
-from routechoices.lib.duration_constants import (
-    DURATION_FIVE_MINUTE,
-)
-from routechoices.lib.helpers import get_remote_image_sizes, initial_of_name, project
+from routechoices.lib.duration_constants import DURATION_FIVE_MINUTE
+from routechoices.lib.helpers import (Wgs84Coordinate, get_remote_image_sizes,
+                                      initial_of_name, project)
 from routechoices.lib.other_gps_services.commons import (
-    EventImportError,
-    MapsImportError,
-    ThirdPartyTrackingSolutionWithProxy,
-)
+    EventImportError, MapsImportError, ThirdPartyTrackingSolutionWithProxy)
 
 
 class Livelox(ThirdPartyTrackingSolutionWithProxy):
@@ -152,8 +148,10 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
             raise MapsImportError("Could not extract basic map info")
 
         map_obj = Map()
-        coordinates = [f"{b['latitude']},{b['longitude']}" for b in map_bounds[::-1]]
-        map_obj.corners_coordinates = ",".join(coordinates)
+        bound = list(
+            [Wgs84Coordinate((b["latitude"], b["longitude"])) for b in map_bounds[::-1]]
+        )
+        map_obj.bound = bound
 
         length, size = get_remote_image_sizes(map_url)
         width, height = size
@@ -214,13 +212,14 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
         for course in courses:
             for i, course_img_data in enumerate(course.get("courseImages")):
                 course_bounds = course_img_data["boundingPolygon"]["vertices"]
-                coordinates = [
-                    f"{b['latitude']},{b['longitude']}" for b in course_bounds[::-1]
+                bound = [
+                    Wgs84Coordinate((b["latitude"], b["longitude"]))
+                    for b in course_bounds[::-1]
                 ]
                 course_url = course_img_data["url"]
 
                 course_map = Map(name=f"Course {i+1}")
-                course_map.corners_coordinates = ",".join(coordinates)
+                course_map.bound = bound
 
                 r = requests.get(course_url)
                 if r.status_code != 200:
@@ -509,7 +508,7 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
                 map_drawing.save(out_buffer, "PNG", **params)
                 f_new = ContentFile(out_buffer.getvalue())
                 course_map = Map(name=f"Course {i+1}")
-                course_map.corners_coordinates = map_obj.corners_coordinates
+                course_map.calibration_string_raw = map_obj.calibration_string_raw
                 course_map.image.save("imported_image", f_new, save=False)
                 course_map.width = map_drawing.width
                 course_map.height = map_drawing.height
@@ -545,7 +544,7 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
             for pt in pts_raw:
                 if map_projection:
                     px, py = project(matrix, pt[1] / 10, pt[2] / 10)
-                    latlon = map_obj.map_xy_to_wsg84(px, py)
+                    latlon = map_obj.map_xy_to_wsg84((px, py))
                     pts.append(
                         (int((pt[0] - time_offset) / 1e3), latlon["lat"], latlon["lon"])
                     )

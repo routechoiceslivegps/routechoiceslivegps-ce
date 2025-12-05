@@ -24,43 +24,24 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.timezone import now
 from django_hosts.resolvers import reverse
 from hijack.views import ReleaseUserView
+from invitations.forms import InviteForm
 from kagi.views.backup_codes import BackupCodesView
 from user_sessions.views import SessionDeleteOtherView
 
-from invitations.forms import InviteForm
-from routechoices.core.models import (
-    Club,
-    Competitor,
-    Device,
-    DeviceClubOwnership,
-    Event,
-    EventSet,
-    ImeiDevice,
-    Map,
-    Notice,
-)
-from routechoices.dashboard.forms import (
-    ClubDomainForm,
-    ClubForm,
-    CompetitorFormSet,
-    DeviceForm,
-    EventForm,
-    EventSetForm,
-    ExtraMapFormSet,
-    MapForm,
-    MergeMapsForm,
-    NoticeForm,
-    RequestInviteForm,
-    UploadGPXForm,
-    UploadKmzForm,
-    UploadMapGPXForm,
-    UserForm,
-)
-from routechoices.lib.helpers import (
-    get_current_site,
-    set_content_disposition,
-    short_random_key,
-)
+from routechoices.core.models import (Club, Competitor, Device,
+                                      DeviceClubOwnership, Event, EventSet,
+                                      ImeiDevice, Map, Notice)
+from routechoices.dashboard.forms import (ClubDomainForm, ClubForm,
+                                          CompetitorFormSet, DeviceForm,
+                                          EventForm, EventSetForm,
+                                          ExtraMapFormSet, MapForm,
+                                          MergeMapsForm, NoticeForm,
+                                          RequestInviteForm, UploadGPXForm,
+                                          UploadKmzForm, UploadMapGPXForm,
+                                          UserForm)
+from routechoices.lib.helpers import (get_current_site,
+                                      set_content_disposition,
+                                      short_random_key)
 from routechoices.lib.s3 import serve_from_s3
 from routechoices.lib.streaming_response import StreamingHttpRangeResponse
 
@@ -1244,7 +1225,7 @@ def dashboard_map_download(request, map_id, *args, **kwargs):
         file_path,
         filename=(
             f"{raster_map.name}_"
-            f"{raster_map.corners_coordinates_string}_."
+            f"{raster_map.get_calibration_string()}_."
             f"{mime_type[6:]}"
         ),
         mime=mime_type,

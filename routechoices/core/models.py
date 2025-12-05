@@ -20,21 +20,21 @@ import gpxpy.gpx
 import magic
 import numpy as np
 import orjson as json
-import reverse_geocode
 from allauth.account.models import EmailAddress
 from dateutil.parser import parse as parse_date
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.gis.geos import LinearRing, Polygon
-from django.contrib.postgres.fields import ArrayField
-from django.core.exceptions import BadRequest, PermissionDenied, ValidationError
+from django.core.exceptions import (BadRequest, PermissionDenied,
+                                    ValidationError)
 from django.core.files.base import ContentFile, File
 from django.core.mail import EmailMessage
 from django.core.paginator import Paginator
-from django.core.validators import MaxValueValidator, MinValueValidator, validate_slug
+from django.core.validators import (MaxValueValidator, MinValueValidator,
+                                    validate_slug)
 from django.db import models
-from django.db.models import F, Max, Q, Value
-from django.db.models.functions import Cast, ExtractMonth, ExtractYear, Upper
+from django.db.models import F, Max, Q
+from django.db.models.functions import ExtractMonth, ExtractYear, Upper
 from django.db.models.signals import post_delete, pre_delete, pre_save
 from django.dispatch import receiver
 from django.http.response import Http404
@@ -46,46 +46,32 @@ from django_hosts.resolvers import reverse
 from PIL import Image, ImageDraw, ImageFile
 
 from routechoices.lib import cache, plausible
-from routechoices.lib.duration_constants import (
-    DURATION_ONE_MONTH,
-)
+from routechoices.lib.duration_constants import DURATION_ONE_MONTH
 from routechoices.lib.geojson import get_geojson_coordinates
 from routechoices.lib.globalmaptiles import GlobalMercator
-from routechoices.lib.helpers import (
-    adjugate_matrix,
-    avg_angles,
-    delete_domain,
-    distance_latlon,
-    epoch_to_datetime,
-    general_2d_projection,
-    get_current_site,
-    gpsseuranta_encode_data,
-    int_base32,
-    project,
-    random_device_id,
-    random_key,
-    safe64encodedsha,
-    short_random_key,
-    short_random_slug,
-    shortsafe64encodedsha,
-    simplify_line,
-    simplify_periods,
-    time_base32,
-)
+from routechoices.lib.helpers import (COUNTRIES, Point, Wgs84Coordinate,
+                                      XYMeters, adjugate_matrix, avg_angles,
+                                      calibration_string_from_wgs84_bound,
+                                      country_code_at_coords, delete_domain,
+                                      distance_between_locations,
+                                      epoch_to_datetime, general_2d_projection,
+                                      get_current_site,
+                                      gpsseuranta_encode_data, int_base32,
+                                      project, random_device_id, random_key,
+                                      safe64encodedsha, short_random_key,
+                                      short_random_slug, shortsafe64encodedsha,
+                                      simplify_line, simplify_periods,
+                                      time_base32, timezone_at_coords,
+                                      triangle_area, wgs84_to_meters)
 from routechoices.lib.jxl import register_jxl_opener
 from routechoices.lib.storages import OverwriteImageStorage
-from routechoices.lib.validators import (
-    color_hex_validator,
-    validate_corners_coordinates,
-    validate_domain_name,
-    validate_domain_slug,
-    validate_emails,
-    validate_esn,
-    validate_imei,
-    validate_latitude,
-    validate_longitude,
-    validate_nice_slug,
-)
+from routechoices.lib.validators import (color_hex_validator,
+                                         validate_calibration_string,
+                                         validate_domain_name,
+                                         validate_domain_slug, validate_emails,
+                                         validate_esn, validate_imei,
+                                         validate_latitude, validate_longitude,
+                                         validate_nice_slug)
 
 register_jxl_opener()
 
@@ -102,14 +88,46 @@ LOCATION_TIMESTAMP_INDEX = 0
 LOCATION_LATITUDE_INDEX = 1
 LOCATION_LONGITUDE_INDEX = 2
 
-END_FREE_OCLUB = parse_date("2026-01-01T00:00:00Z")
+TOP_LEFT = 0
+TOP_RIGHT = 1
+BOTTOM_RIGHT = 2
+BOTTOM_LEFT = 3
 
-COUNTRIES = reverse_geocode.GeocodeData()._countries
+END_FREE_OCLUB = parse_date("2026-01-01T00:00:00Z")
 
 
 class StringToArray(models.Func):
     function = "string_to_array"
     arity = 2
+
+
+class SomewhereOnEarth:
+    def get_earth_coords(self):
+        raise NotImplementedError("You must implement the get_earth_coords method")
+
+    @property
+    def country_code(self):
+        if coords := self.earth_coords:
+            return country_code_at_coords(Wgs84Coordinate(coords))
+        return None
+
+    @property
+    def timezone(self):
+        if coords := self.earth_coords:
+            return timezone_at_coords(Wgs84Coordinate(coords))
+        return None
+
+    @property
+    def country_name(self):
+        if cc := self.country_code:
+            return COUNTRIES.get(cc, "")
+        return "Unknown"
+
+    @property
+    def country_flag(self):
+        if cc := self.country_code:
+            return flag.flag(cc)
+        return "🌍"
 
 
 class GPSSeurantaClient:
@@ -136,22 +154,6 @@ class GPSSeurantaClient:
 
 
 gpsseuranta_client = GPSSeurantaClient()
-
-
-class Point:
-    def __init__(self, x, y=None):
-        if isinstance(x, tuple):
-            self.x = x[0]
-            self.y = x[1]
-        elif isinstance(x, dict):
-            self.x = x.get("x")
-            self.y = x.get("y")
-        else:
-            self.x = x
-            self.y = y
-
-    def __repr__(self):
-        return f"x: {self.x}, y:{self.y}"
 
 
 def logo_upload_path(instance=None, file_name=None):
@@ -486,7 +488,7 @@ CACHED_TILE = 1
 CACHED_BLANK_TILE = 2
 
 
-class Map(models.Model):
+class Map(models.Model, SomewhereOnEarth):
     aid = models.CharField(
         default=random_key,
         max_length=12,
@@ -511,23 +513,13 @@ class Map(models.Model):
         blank=True,
         editable=False,
     )
-    corners_coordinates = models.CharField(
+    calibration_string_raw = models.CharField(
         max_length=255,
         help_text="Latitude and longitude of map corners separated by commas "
         "in following order Top Left, Top right, Bottom Right, Bottom left. "
         "eg: 60.519,22.078,60.518,22.115,60.491,22.112,60.492,22.073",
-        validators=[validate_corners_coordinates],
+        validators=[validate_calibration_string],
     )
-    """
-    _corners_coordinates = models.GeneratedField(
-        expression=Cast(
-            StringToArray(F("corners_coordinates"), Value(",")),
-            output_field=ArrayField(models.FloatField(), size=8),
-        ),
-        output_field=ArrayField(models.FloatField(), size=8),
-        db_persist=True,
-    )
-    """
 
     class Meta:
         ordering = ["-creation_date"]
@@ -548,7 +540,6 @@ class Map(models.Model):
             return cached
         with self.image.open("rb") as fp:
             data = fp.read()
-
         cache.set(cache_key, data, DURATION_ONE_MONTH)
         return data
 
@@ -609,23 +600,29 @@ class Map(models.Model):
 
     @property
     def hash(self):
-        return shortsafe64encodedsha(
-            f"{self.path}:{self.corners_coordinates}:20230420"
-        )[:8]
+        return shortsafe64encodedsha(f"{self.path}:{self.calibration_string_raw}")[:8]
 
     @cached_property
-    def corners_coordinates_array(self):
-        return [float(x) for x in self.corners_coordinates.split(",")]
+    def calibration_values(self):
+        return [float(x) for x in self.calibration_string_raw.split(",")]
 
-    @property
-    def corners_coordinates_string(self):
+    def get_calibration_string(self, separator="_", precision=5):
         return np.array2string(
-            np.array(self.corners_coordinates_array), separator="_", precision=5
+            np.array(self.calibration_values), separator=separator, precision=precision
         )[1:-1]
 
-    @cached_property
+    @property
     def bound(self):
-        coords = self.corners_coordinates_array
+        vals = self.calibration_values
+        return [Wgs84Coordinate(vals[2 * i : 2 * i + 2]) for i in range(4)]
+
+    @bound.setter
+    def bound(self, value):
+        self.calibration_string_raw = calibration_string_from_wgs84_bound(value)
+
+    @property
+    def bound_api(self):
+        coords = self.calibration_values
         return {
             "top_left": {"lat": coords[0], "lon": coords[1]},
             "top_right": {"lat": coords[2], "lon": coords[3]},
@@ -641,63 +638,63 @@ class Map(models.Model):
     @property
     def min_lon(self):
         return min(
-            self.bound["top_left"]["lon"],
-            self.bound["bottom_left"]["lon"],
-            self.bound["bottom_right"]["lon"],
-            self.bound["top_right"]["lon"],
+            self.bound[TOP_LEFT].longitude,
+            self.bound[BOTTOM_LEFT].longitude,
+            self.bound[BOTTOM_RIGHT].longitude,
+            self.bound[TOP_RIGHT].longitude,
         )
 
     @property
     def max_lon(self):
         return max(
-            self.bound["top_left"]["lon"],
-            self.bound["bottom_left"]["lon"],
-            self.bound["bottom_right"]["lon"],
-            self.bound["top_right"]["lon"],
+            self.bound[TOP_LEFT].longitude,
+            self.bound[BOTTOM_LEFT].longitude,
+            self.bound[BOTTOM_RIGHT].longitude,
+            self.bound[TOP_RIGHT].longitude,
         )
 
     @property
     def min_lat(self):
         return min(
-            self.bound["top_left"]["lat"],
-            self.bound["bottom_left"]["lat"],
-            self.bound["bottom_right"]["lat"],
-            self.bound["top_right"]["lat"],
+            self.bound[TOP_LEFT].latitude,
+            self.bound[BOTTOM_LEFT].latitude,
+            self.bound[BOTTOM_RIGHT].latitude,
+            self.bound[TOP_RIGHT].latitude,
         )
 
     @property
     def max_lat(self):
         return max(
-            self.bound["top_left"]["lat"],
-            self.bound["bottom_left"]["lat"],
-            self.bound["bottom_right"]["lat"],
-            self.bound["top_right"]["lat"],
+            self.bound[TOP_LEFT].latitude,
+            self.bound[BOTTOM_LEFT].latitude,
+            self.bound[BOTTOM_RIGHT].latitude,
+            self.bound[TOP_RIGHT].latitude,
         )
 
     @property
     def max_xy(self):
-        return GLOBAL_MERCATOR.latlon_to_meters(
-            {"lat": self.max_lat, "lon": self.max_lon}
-        )
+        return wgs84_to_meters(self.max_lat, self.max_lon)
 
     @property
     def min_xy(self):
-        return GLOBAL_MERCATOR.latlon_to_meters(
-            {"lat": self.min_lat, "lon": self.min_lon}
-        )
+        return wgs84_to_meters(self.min_lat, self.min_lon)
 
     @property
     def alignment_points(self):
         width, height = self.quick_size
-        a1 = Point(0, 0)
-        b1 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["top_left"]))
-        a2 = Point(0, height)
-        b2 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["bottom_left"]))
-        a3 = Point(width, 0)
-        b3 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["top_right"]))
-        a4 = Point(width, height)
-        b4 = Point(GLOBAL_MERCATOR.latlon_to_meters(self.bound["bottom_right"]))
-        return a1, a2, a3, a4, b1, b2, b3, b4
+        map_corners = (
+            Point(0, 0),
+            Point(0, height),
+            Point(width, height),
+            Point(width, 0),
+        )
+        map_corners_xy_meters = (
+            wgs84_to_meters(self.bound[TOP_LEFT]),
+            wgs84_to_meters(self.bound[BOTTOM_LEFT]),
+            wgs84_to_meters(self.bound[BOTTOM_RIGHT]),
+            wgs84_to_meters(self.bound[TOP_RIGHT]),
+        )
+        return map_corners, map_corners_xy_meters
 
     @property
     def matrix_3d(self):
@@ -710,63 +707,48 @@ class Map(models.Model):
     def matrix_3d_inverse(self):
         return adjugate_matrix(self.matrix_3d)
 
-    @cached_property
+    @property
     def map_xy_to_spherical_mercator(self):
-        return lambda x, y: project(self.matrix_3d, x, y)
+        return lambda xy: project(self.matrix_3d, Point(xy))
 
-    @cached_property
+    @property
     def spherical_mercator_to_map_xy(self):
-        return lambda x, y: project(self.matrix_3d_inverse, x, y)
+        return lambda xy: project(self.matrix_3d_inverse, Point(xy))
 
-    def wsg84_to_map_xy(self, lat, lon, round_values=False):
-        world_xy = GLOBAL_MERCATOR.latlon_to_meters({"lat": lat, "lon": lon})
-        map_xy = self.spherical_mercator_to_map_xy(world_xy["x"], world_xy["y"])
+    def wsg84_to_map_xy(self, wgs84_coordinate, round_values=False):
+        xy_meter = Wgs84Coordinate(wgs84_coordinate).xy_meters
+        image_xy = self.spherical_mercator_to_image_xy(xy_meter)
         if round_values:
-            return round(map_xy[0]), round(map_xy[1])
-        return map_xy
+            return image_xy.round(5)
+        return image_xy
 
-    def map_xy_to_wsg84(self, x, y):
-        mx, my = self.map_xy_to_spherical_mercator(x, y)
-        return GLOBAL_MERCATOR.meters_to_latlon({"x": mx, "y": my})
+    def map_xy_to_wsg84(self, xy):
+        xy_meters = XYMeters(self.map_xy_to_spherical_mercator(Point(xy)))
+        return xy_meters.wgs84_coordinate
 
     @property
     def center(self):
         width, height = self.quick_size
-        return self.map_xy_to_wsg84(width / 2, height / 2)
+        return self.map_xy_to_wsg84((width / 2, height / 2))
 
-    @cached_property
-    def country_code(self):
-        center = self.center
-        return reverse_geocode.get([center["lat"], center["lon"]]).get("country_code")
-
-    @cached_property
-    def country_name(self):
-        return ""
-
-    @cached_property
-    def country_flag(self):
-        if cc := self.country_code:
-            return flag.flag(cc)
-        return "🌍"
+    @property
+    def earth_coords(self):
+        return self.center
 
     @cached_property
     def area(self):
         # Area in m^2
-        width, height = self.quick_size
-        ll_a = self.map_xy_to_wsg84(0, 0)
-        ll_b = self.map_xy_to_wsg84(width, 0)
-        ll_c = self.map_xy_to_wsg84(width, height)
-        ll_d = self.map_xy_to_wsg84(0, height)
+        tl, tr, bl, br = self.bound
 
-        a = distance_latlon(ll_a, ll_b)
-        b = distance_latlon(ll_b, ll_c)
-        c = distance_latlon(ll_c, ll_a)
-        d = distance_latlon(ll_a, ll_d)
-        e = distance_latlon(ll_d, ll_c)
+        side_a = distance_between_locations(tl, tr)
+        side_b = distance_between_locations(tr, br)
+        side_c = distance_between_locations(br, bl)
+        side_d = distance_between_locations(bl, tl)
+        diagonal = distance_between_locations(tl, br)
+        triangle_a = (side_a, side_b, diagonal)
+        triangle_b = (side_c, side_d, diagonal)
 
-        return ((a + b + c) * (a + b - c) * (a + c - b) * (b + c - a)) ** 0.5 / 4 + (
-            (c + d + e) * (c + d - e) * (c + e - d) * (e + d - c)
-        ) ** 0.5 / 4
+        return triangle_area(triangle_a) + triangle_area(triangle_b)
 
     @cached_property
     def resolution(self):
@@ -776,7 +758,7 @@ class Map(models.Model):
 
     @property
     def max_zoom(self):
-        center_latitude = self.center["lat"]
+        center_latitude = self.center.latitude
         meters_per_pixel_at_zoom_18 = (
             40_075_016.686 * math.cos(center_latitude * math.pi / 180) / (2 ** (18 + 8))
         )
@@ -786,21 +768,21 @@ class Map(models.Model):
     @cached_property
     def rotation(self):
         width, height = self.quick_size
-        tl = self.map_xy_to_spherical_mercator(0, 0)
-        tr = self.map_xy_to_spherical_mercator(width, 0)
-        br = self.map_xy_to_spherical_mercator(width, height)
-        bl = self.map_xy_to_spherical_mercator(0, height)
+        tl = self.map_xy_to_spherical_mercator((0, 0))
+        tr = self.map_xy_to_spherical_mercator((width, 0))
+        br = self.map_xy_to_spherical_mercator((width, height))
+        bl = self.map_xy_to_spherical_mercator((0, height))
 
         rot_vert_left = (
-            (math.atan2(tl[1] - bl[1], tl[0] - bl[0]) - math.pi / 2) * 180 / math.pi
+            (math.atan2(tl.y - bl.y, tl.x - bl.x) - math.pi / 2) * 180 / math.pi
         )
         rot_vert_right = (
-            (math.atan2(tr[1] - br[1], tr[0] - br[0]) - math.pi / 2) * 180 / math.pi
+            (math.atan2(tr.y - br.y, tr.x - br.x) - math.pi / 2) * 180 / math.pi
         )
         rot_vert = (avg_angles(rot_vert_left, rot_vert_right)) % 360
 
-        rot_hori_top = (math.atan2(tr[1] - tl[1], tr[0] - tl[0])) * 180 / math.pi
-        rot_hori_bottom = (math.atan2(br[1] - bl[1], br[0] - bl[0])) * 180 / math.pi
+        rot_hori_top = (math.atan2(tr.y - tl.y, tr.x - tl.x)) * 180 / math.pi
+        rot_hori_bottom = (math.atan2(br.y - bl.y, br.x - bl.x)) * 180 / math.pi
         rot_hori = avg_angles(rot_hori_top, rot_hori_bottom) % 360
 
         return round(avg_angles(rot_vert, rot_hori), 2)
@@ -892,10 +874,10 @@ class Map(models.Model):
             return tile, cache_status
 
         width, height = self.quick_size
-        tl = self.map_xy_to_spherical_mercator(0, 0)
-        tr = self.map_xy_to_spherical_mercator(width, 0)
-        br = self.map_xy_to_spherical_mercator(width, height)
-        bl = self.map_xy_to_spherical_mercator(0, height)
+        tl = self.map_xy_to_spherical_mercator((0, 0))
+        tr = self.map_xy_to_spherical_mercator((width, 0))
+        br = self.map_xy_to_spherical_mercator((width, height))
+        bl = self.map_xy_to_spherical_mercator((0, height))
 
         p1 = np.float32(
             [
@@ -913,10 +895,10 @@ class Map(models.Model):
 
             p2 = np.float32(
                 [
-                    [(tl[0] - min_x) / r_w, (max_y - tl[1]) / r_h],
-                    [(tr[0] - min_x) / r_w, (max_y - tr[1]) / r_h],
-                    [(br[0] - min_x) / r_w, (max_y - br[1]) / r_h],
-                    [(bl[0] - min_x) / r_w, (max_y - bl[1]) / r_h],
+                    [(tl.x - min_x) / r_w, (max_y - tl.y) / r_h],
+                    [(tr.x - min_x) / r_w, (max_y - tr.y) / r_h],
+                    [(br.x - min_x) / r_w, (max_y - br.y) / r_h],
+                    [(bl.x - min_x) / r_w, (max_y - bl.y) / r_h],
                 ]
             )
             coeffs = cv2.getPerspectiveTransform(p1, p2)
@@ -979,11 +961,11 @@ class Map(models.Model):
         )
         map_bounds_poly = Polygon(
             LinearRing(
-                self.map_xy_to_spherical_mercator(0, 0),
-                self.map_xy_to_spherical_mercator(0, height),
-                self.map_xy_to_spherical_mercator(width, height),
-                self.map_xy_to_spherical_mercator(width, 0),
-                self.map_xy_to_spherical_mercator(0, 0),
+                self.map_xy_to_spherical_mercator((0, 0)).xy,
+                self.map_xy_to_spherical_mercator((0, height)).xy,
+                self.map_xy_to_spherical_mercator((width, height)).xy,
+                self.map_xy_to_spherical_mercator((width, 0)).xy,
+                self.map_xy_to_spherical_mercator((0, 0)).xy,
             )
         )
         tile_bounds_poly_prep = tile_bounds_poly.prepared
@@ -1048,7 +1030,7 @@ class Map(models.Model):
             ),
         ]
 
-        new_map.corners_coordinates = ",".join(
+        new_map.bound = ",".join(
             f"{round(c['lat'], 5)},{round(c['lon'], 5)}" for c in corners
         )
 
@@ -1164,7 +1146,7 @@ class Map(models.Model):
         map_obj.image.save("imported_image", out_file, save=False)
         map_obj.width = width
         map_obj.height = height
-        map_obj.corners_coordinates = self.corners_coordinates
+        map_obj.calibration_string_raw = self.calibration_string_raw
         return map_obj
 
     def merge(self, *other_maps):
@@ -1217,7 +1199,7 @@ class Map(models.Model):
             map_obj.image.save("imported_image", out_file, save=False)
             map_obj.width = w
             map_obj.height = h
-            map_obj.corners_coordinates = self.corners_coordinates
+            map_obj.calibration_string_raw = self.calibration_string_raw
             return map_obj.merge(*other_maps)
 
         new_image = Image.new(
@@ -1238,11 +1220,11 @@ class Map(models.Model):
         map_obj.width = new_image.width
         map_obj.height = new_image.height
 
-        new_tl = self.map_xy_to_wsg84(min_x, min_y)
-        new_tr = self.map_xy_to_wsg84(max_x, min_y)
-        new_br = self.map_xy_to_wsg84(max_x, max_y)
-        new_bl = self.map_xy_to_wsg84(min_x, max_y)
-        map_obj.corners_coordinates = f'{round(new_tl["lat"], 5)},{round(new_tl["lon"], 5)},{round(new_tr["lat"], 5)},{round(new_tr["lon"], 5)},{round(new_br["lat"], 5)},{round(new_br["lon"], 5)},{round(new_bl["lat"], 5)},{round(new_bl["lon"], 5)}'
+        new_tl = self.map_xy_to_wsg84((min_x, min_y))
+        new_tr = self.map_xy_to_wsg84((max_x, min_y))
+        new_br = self.map_xy_to_wsg84((max_x, max_y))
+        new_bl = self.map_xy_to_wsg84((min_x, max_y))
+        map_obj.calibration_string_raw = f'{round(new_tl["lat"], 5)},{round(new_tl["lon"], 5)},{round(new_tr["lat"], 5)},{round(new_tr["lon"], 5)},{round(new_br["lat"], 5)},{round(new_br["lon"], 5)},{round(new_bl["lat"], 5)},{round(new_bl["lon"], 5)}'
 
         return map_obj.overlay(*other_maps)
 
@@ -1441,7 +1423,7 @@ class EventSet(models.Model):
         }
 
 
-class Event(models.Model):
+class Event(models.Model, SomewhereOnEarth):
     aid = models.CharField(
         default=random_key,
         max_length=12,
@@ -2074,32 +2056,21 @@ class Event(models.Model):
         cache.set(cache_key, data_out, DURATION_ONE_MONTH)
         return data_out
 
-    @cached_property
-    def country_code(self):
-        loc = None
+    @property
+    def earth_coords(self):
         if self.map:
-            return self.map.country_code
+            return self.map.earth_coords
         if self.geojson_layer:
-            cache_key = f"geojson:{self.geojson_layer.name}:country_code"
+            cache_key = f"geojson:{self.geojson_layer.name}:coords"
             if cached := cache.get(cache_key):
-                return cache
+                return cached
             geojson_raw = self.geojson_layer.read()
             geojson = json.loads(geojson_raw)
             pt = get_geojson_coordinates(geojson)
-            cc = reverse_geocode.get([pt[1], pt[0]]).get("country_code")
-            cache.set(cache_key, cc, DURATION_ONE_MONTH)
-            return cc
+            coords = [pt[1], pt[0]]
+            cache.set(cache_key, coords, DURATION_ONE_MONTH)
+            return coords
         return None
-
-    @cached_property
-    def country_name(self):
-        return ""
-
-    @cached_property
-    def country_flag(self):
-        if cc := self.country_code:
-            return flag.flag(cc)
-        return "🌍"
 
 
 class Notice(models.Model):
@@ -2128,7 +2099,7 @@ class MapAssignation(models.Model):
         ordering = ["id"]
 
 
-class Device(models.Model):
+class Device(models.Model, SomewhereOnEarth):
     creation_date = models.DateTimeField(auto_now_add=True)
     modification_date = models.DateTimeField(auto_now=True)
     aid = models.CharField(
@@ -2512,6 +2483,12 @@ class Device(models.Model):
         )
 
     @property
+    def earth_coords(self):
+        if loc := self.last_location:
+            return [loc[1], loc[2]]
+        return None
+
+    @property
     def last_location_datetime(self):
         return self._last_location_datetime
 
@@ -2672,7 +2649,7 @@ class DeviceClubOwnership(models.Model):
         return f"{self.device.aid} for {self.club.name}"
 
 
-class Competitor(models.Model):
+class Competitor(models.Model, SomewhereOnEarth):
     aid = models.CharField(
         default=random_key,
         max_length=12,
@@ -2781,9 +2758,24 @@ class Competitor(models.Model):
         return locs
 
     @property
-    def encoded_data(self):
+    def locations_encoded(self):
         result = gps_data_codec.encode(self.locations)
         return result
+
+    def archive_device(self, save=True):
+        if not self.device:
+            return None
+        archive = Device(
+            aid=f"{short_random_key()}_ARC",
+            virtual=True,
+            locations_encoded=self.locations_encoded,
+        )
+        self.device = archive
+        if save:
+            archive.save()
+            DeviceArchiveReference.objects.create(original=self.device, archive=archive)
+            self.save()
+        return archive
 
     @property
     def gpx(self):
@@ -2805,6 +2797,48 @@ class Competitor(models.Model):
         if not self.tags:
             return []
         return self.tags.split(" ")
+
+    @property
+    def earth_coords(self):
+        if locs := self.locations:
+            loc = locs[0]
+            return [loc[1], loc[2]]
+        return None
+
+    @property
+    def duration(self):
+        if locations := self.locations:
+            return (
+                locations[-1][LOCATION_TIMESTAMP_INDEX]
+                - locations[0][LOCATION_TIMESTAMP_INDEX]
+            )
+        return 0
+
+    @property
+    def distance(self):
+        if locations := self.locations:
+            return 0
+            distance = 0
+            prev_pt = locations[0]
+            rad = math.pi / 180
+            for pt in locations[1:]:
+                dlat = pt[LOCATION_LATITUDE_INDEX] - prev_pt[LOCATION_LATITUDE_INDEX]
+                dlon = pt[LOCATION_LONGITUDE_INDEX] - prev_pt[LOCATION_LONGITUDE_INDEX]
+                alpha = (
+                    math.sin(rad * dlat / 2) ** 2
+                    + math.cos(rad * pt[LOCATION_LATITUDE_INDEX])
+                    * math.cos(rad * prev_pt[LOCATION_LATITUDE_INDEX])
+                    * math.sin(rad * dlon / 2) ** 2
+                )
+                distance += 12756274 * math.atan2(
+                    math.sqrt(alpha), math.sqrt(1 - alpha)
+                )
+                prev_pt = pt
+        return distance
+
+    @property
+    def locations_hash(self):
+        return shortsafe64encodedsha(self.locations_encoded)[:8]
 
 
 @receiver([pre_save, post_delete], sender=Competitor)

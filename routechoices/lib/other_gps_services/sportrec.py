@@ -7,14 +7,12 @@ from curl_cffi import requests
 from django.core.files.base import ContentFile
 from PIL import Image
 
-from routechoices.core.models import PRIVACY_SECRET, Competitor, Device, Event, Map
+from routechoices.core.models import (PRIVACY_SECRET, Competitor, Device,
+                                      Event, Map)
 from routechoices.lib.helpers import safe64encodedsha
 from routechoices.lib.other_gps_services.commons import (
-    CompetitorsImportError,
-    EventImportError,
-    MapsImportError,
-    ThirdPartyTrackingSolution,
-)
+    CompetitorsImportError, EventImportError, MapsImportError,
+    ThirdPartyTrackingSolution)
 
 
 class SportRec(ThirdPartyTrackingSolution):
@@ -79,7 +77,7 @@ class SportRec(ThirdPartyTrackingSolution):
             map_obj.width = width
             map_obj.height = height
             map_obj.image.update_dimension_fields(force=True)
-            map_obj.corners_coordinates = calib_string
+            map_obj.calibration_string_raw = calib_string
             map_obj.save()
         except Exception:
             map_obj.delete()

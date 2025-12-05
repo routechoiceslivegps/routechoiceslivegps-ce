@@ -2,15 +2,8 @@ from curl_cffi import requests
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 
-from routechoices.core.models import (
-    PRIVACY_SECRET,
-    Club,
-    Competitor,
-    Device,
-    Event,
-    Map,
-    MapAssignation,
-)
+from routechoices.core.models import (PRIVACY_SECRET, Club, Competitor, Device,
+                                      Event, Map, MapAssignation)
 from routechoices.lib.helpers import epoch_to_datetime, safe64encodedsha
 
 
@@ -144,7 +137,7 @@ class ThirdPartyTrackingSolutionWithProxy(ThirdPartyTrackingSolution):
             defaults={
                 "width": tmp_map.width,
                 "height": tmp_map.height,
-                "corners_coordinates": tmp_map.corners_coordinates,
+                "calibration_string_raw": tmp_map.calibration_string_raw,
             },
         )
         if map_file := self.get_map_file():
