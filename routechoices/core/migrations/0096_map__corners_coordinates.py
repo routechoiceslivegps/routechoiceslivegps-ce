@@ -13,23 +13,4 @@ class Migration(migrations.Migration):
         ("core", "0095_alter_competitor_start_time_alter_event_end_date_and_more"),
     ]
 
-    operations = [
-        migrations.AddField(
-            model_name="map",
-            name="_corners_coordinates",
-            field=models.GeneratedField(
-                db_persist=True,
-                expression=django.db.models.functions.comparison.Cast(
-                    routechoices.core.models.StringToArray(
-                        models.F("corners_coordinates"), models.Value(",")
-                    ),
-                    output_field=django.contrib.postgres.fields.ArrayField(
-                        base_field=models.FloatField(), size=8
-                    ),
-                ),
-                output_field=django.contrib.postgres.fields.ArrayField(
-                    base_field=models.FloatField(), size=8
-                ),
-            ),
-        ),
-    ]
+    operations = []

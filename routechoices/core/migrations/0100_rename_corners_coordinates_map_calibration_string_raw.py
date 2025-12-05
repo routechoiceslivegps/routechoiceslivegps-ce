@@ -9,10 +9,4 @@ class Migration(migrations.Migration):
         ("core", "0099_remove_map__corners_coordinates"),
     ]
 
-    operations = [
-        migrations.RenameField(
-            model_name="map",
-            old_name="corners_coordinates",
-            new_name="calibration_string_raw",
-        ),
-    ]
+    operations = []

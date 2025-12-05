@@ -217,7 +217,7 @@ class Migration(migrations.Migration):
                     models.PositiveIntegerField(blank=True, editable=False, null=True),
                 ),
                 (
-                    "corners_coordinates",
+                    "calibration_string_raw",
                     models.CharField(
                         help_text=(
                             "Latitude and longitude of map corners separated by commas "

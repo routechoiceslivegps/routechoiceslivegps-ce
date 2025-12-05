@@ -975,8 +975,8 @@ class MapAdmin(admin.ModelAdmin):
 
     def center_link(self, obj):
         center = obj.center
-        lat = round(center["lat"], 5)
-        lon = round(center["lon"], 5)
+        lat = round(center.latitude, 5)
+        lon = round(center.longitude, 5)
         return format_html(
             '<a href="https://map.routechoices.com/?latlon={},{}" target="_blank">{}, {}</a>',
             lat,
