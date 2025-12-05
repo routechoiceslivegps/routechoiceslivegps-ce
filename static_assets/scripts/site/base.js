@@ -1,10 +1,3 @@
-if (window.Sentry) {
-	Sentry.init({
-		dsn: window.local.sentryDsn,
-		release: `routechoices@${window.local.siteVersion}`,
-	});
-}
-
 function getStoredTheme() {
 	const name = "theme=";
 	const decodedCookie = decodeURIComponent(document.cookie);
