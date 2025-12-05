@@ -65,10 +65,16 @@
                 {% endif %}
             {% endblock footer %}
         {% endblock body %}
-        <script src="https://js.sentry-cdn.com/{{ sentry_dsn }}.min.js" crossorigin="anonymous"></script>
+        <script
+            src="https://browser.sentry-cdn.com/10.29.0/bundle.min.js"
+            integrity="sha384-ik2TZN6tbVWrf0Y5KNqrVRPZhA8BVxdg6iOJbfcf/ORz9YWzv6P1ydWuEsemxM2P"
+            crossorigin="anonymous"
+        ></script>
         <script src="{% static 'scripts/load-local-variables.js' %}?_=2023112700"
                 data-site-version="{{ version }}"
-                data-api-root="{% host_url 'api_doc' host 'api' %}"></script>
+                data-sentry-dsn="{{ sentry_dsn }}"
+                data-api-root="{% host_url 'api_doc' host 'api' %}">
+        </script>
         {% if analytics_enabled and request.host.name != 'dashboard' %}
             <script defer
                     {% if request.club_slug %}data-club-slug="{{ request.club_slug }}"{% endif %}

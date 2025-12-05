@@ -42,7 +42,7 @@ orjson
 pillow
 psycopg[binary,pool]
 python-magic
-sentry-sdk
+sentry-sdk[django]
 setuptools
 sewer @ git+https://github.com/rphlo/sewer@0.8.4b
 tornado

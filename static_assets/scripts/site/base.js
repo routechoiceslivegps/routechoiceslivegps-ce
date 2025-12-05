@@ -1,3 +1,7 @@
+if (Sentry) {
+	Sentry.init({ dsn: window.local.sentryDsn });
+}
+
 function getStoredTheme() {
 	const name = "theme=";
 	const decodedCookie = decodeURIComponent(document.cookie);
