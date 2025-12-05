@@ -9,9 +9,4 @@ class Migration(migrations.Migration):
         ("core", "0098_remove_club_is_personal_page"),
     ]
 
-    operations = [
-        migrations.RemoveField(
-            model_name="map",
-            name="_corners_coordinates",
-        ),
-    ]
+    operations = []
