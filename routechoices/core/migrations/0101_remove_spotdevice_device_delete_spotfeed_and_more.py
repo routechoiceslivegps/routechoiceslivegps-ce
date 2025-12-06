@@ -11,9 +11,6 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.DeleteModel(
-            name="SpotFeed",
-        ),
-        migrations.DeleteModel(
             name="SpotDevice",
         ),
     ]
