@@ -269,10 +269,10 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
                 circle_radius = 40 * map_resolution
                 line_color = (185, 42, 247, 180)
                 ctrls = [
-                    map_obj.wsg84_to_map_xy(
-                        c["control"]["position"]["latitude"],
+                    map_obj.wsg84_to_map_xy((
+			c["control"]["position"]["latitude"],
                         c["control"]["position"]["longitude"],
-                    )
+                    )).xy
                     for c in route
                 ]
                 for i, ctrl in enumerate(ctrls[:-1]):
@@ -335,14 +335,14 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
                     # draw line between controls
                     if lines := route[i].get("connectionLines"):
                         for line in lines:
-                            start = map_obj.wsg84_to_map_xy(
+                            start = map_obj.wsg84_to_map_xy((
                                 line["start"]["latitude"],
                                 line["start"]["longitude"],
-                            )
-                            end = map_obj.wsg84_to_map_xy(
+                            )).xy
+                            end = map_obj.wsg84_to_map_xy((
                                 line["end"]["latitude"],
                                 line["end"]["longitude"],
-                            )
+                            )).xy
                             draw.line(
                                 [
                                     int(start[0] * upscale),
@@ -409,10 +409,10 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
                     if i + 2 < len(ctrls):
                         text = route[i + 1].get("controlNumberText", f"{i+1}")
                         if controlLoc := route[i + 1].get("controlNumberPosition"):
-                            loc = map_obj.wsg84_to_map_xy(
+                            loc = map_obj.wsg84_to_map_xy((
                                 controlLoc["latitude"],
                                 controlLoc["longitude"],
-                            )
+                            )).xy
                             loc = [int(x * upscale) for x in loc]
                         else:
                             prev_ctrl = ctrls[i]
@@ -546,7 +546,7 @@ class Livelox(ThirdPartyTrackingSolutionWithProxy):
                     px, py = project(matrix, pt[1] / 10, pt[2] / 10)
                     latlon = map_obj.map_xy_to_wsg84((px, py))
                     pts.append(
-                        (int((pt[0] - time_offset) / 1e3), latlon["lat"], latlon["lon"])
+                        (int((pt[0] - time_offset) / 1e3), latlon.latitude, latlon.longitude)
                     )
                 else:
                     pts.append(

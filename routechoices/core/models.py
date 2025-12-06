@@ -717,7 +717,7 @@ class Map(models.Model, SomewhereOnEarth):
 
     def wsg84_to_map_xy(self, wgs84_coordinate, round_values=False):
         xy_meter = Wgs84Coordinate(wgs84_coordinate).xy_meters
-        image_xy = self.spherical_mercator_to_image_xy(xy_meter)
+        image_xy = self.spherical_mercator_to_map_xy(xy_meter)
         if round_values:
             return image_xy.round(5)
         return image_xy
