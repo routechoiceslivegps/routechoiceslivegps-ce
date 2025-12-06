@@ -10,11 +10,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name="spotdevice",
-            name="device",
-        ),
         migrations.DeleteModel(
             name="SpotFeed",
+        ),
+        migrations.DeleteModel(
+            name="SpotDevice",
         ),
     ]
