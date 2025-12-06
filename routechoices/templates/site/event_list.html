@@ -17,9 +17,9 @@
     {% endif %}
 {% endblock favicon %}
 
-{% block head_title %}{% if event_set_page %}{{ event_set.name }}{% else %}Public Events{% endif %}{% if club %} by {{ club.name }} | Powered by {% else %} | {% endif %}Routechoices — Live GPS Tracking{% endblock %}
+{% block head_title %}{% if event_set_page %}{{ event_set.name }}{% else %}Featured Events{% endif %}{% if club %} by {{ club.name }} | Powered by {% else %} | {% endif %}Routechoices — Live GPS Tracking{% endblock %}
 
-{% block head_description %}{% if event_set_page %}{{ event_set.name }}{% else %}List of the public events{% endif %}{% if club %} by {{ club.name }}{% else %} on Routechoices, an easy-to-use, yet powerful, live GPS tracking solution designed for orienteering and outdoor sports enthusiasts.{% endif %}{% endblock %}
+{% block head_description %}{% if event_set_page %}{{ event_set.name }}{% else %}List of the featured events{% endif %}{% if club %} by {{ club.name }}{% else %} on Routechoices, an easy-to-use, yet powerful, live GPS tracking solution designed for orienteering and outdoor sports enthusiasts.{% endif %}{% endblock %}
 
 {% block extra_head %}
     <link rel="alternate"
@@ -27,9 +27,9 @@
           title="{% if club %}{{ club.name }} {% else %}{% endif %}GPS Tracking Event Feed"
           href="{% if club %}{{ club.nice_url }}feed{% else %}{% host_url 'site:public_events_feed' host 'www' %}{% endif %}" />
     <meta property="og:title"
-          content="Public Events{% if club %} by {{ club.name }} | Powered by {% else %} | {% endif %}Routechoices — Live GPS Tracking" />
+          content="Events{% if club %} by {{ club.name }} | Powered by {% else %} | {% endif %}Routechoices — Live GPS Tracking" />
     <meta property="og:description"
-          content="{% if event_set_page %}{{ event_set.name }}{% else %}List of the public events{% endif %}{% if club %} by {{ club.name }}{% else %} on Routechoices, an easy-to-use, yet powerful, live GPS tracking solution designed for orienteering and outdoor sports enthusiasts.{% endif %}" />
+          content="{% if event_set_page %}{{ event_set.name }}{% else %}List of the events{% endif %}{% if club %} by {{ club.name }}{% else %} on Routechoices, an easy-to-use, yet powerful, live GPS tracking solution designed for orienteering and outdoor sports enthusiasts.{% endif %}" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="Routechoices | Live GPS Tracking" />
@@ -78,7 +78,7 @@
                     style="background-image:linear-gradient(0, var(--rc-gradient-filter), var(--rc-gradient-filter)), linear-gradient(120deg, #db62c9cc 0%, #e3be91cc 100%)">
                     <div class="container content" style="min-height: 100px">
                         <div class="row text-center font-weight-bold">
-                            <h1 style="font-family: Atkinson Hyperlegible, sans-serif;font-weight: 700">Public Events</h1>
+                            <h1 style="font-family: Atkinson Hyperlegible, sans-serif;font-weight: 700">Featured Events</h1>
                         </div>
                     </div>
                 </div>
